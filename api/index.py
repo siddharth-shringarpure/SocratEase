@@ -9,7 +9,7 @@ import traceback
 import numpy as np
 import base64
 from PIL import Image
-import cv2  # OpenCV for face detection
+from deepface import DeepFace
 
 # Debug information about Python environment
 print("Python executable:", sys.executable)
@@ -24,42 +24,64 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
-# Load OpenCV's pre-trained face detector
-face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-print("Face detector loaded successfully!")
-
-def detect_emotions(image):
+def detect_emotions(image: Image) -> dict:
     """
-    A simple face detector that returns random emotion values.
-    In a real app, you'd use a proper emotion detection model.
+    Detects faces and emotions in an image using DeepFace.
+    Returns normalized emotion scores and cropped face image.
     """
-    # Convert PIL Image to numpy array for OpenCV
+    # Convert PIL Image to numpy array for DeepFace
     image_arr = np.array(image)
-    # Convert RGB to BGR (OpenCV format)
-    image_arr = image_arr[:, :, ::-1].copy()
     
-    # Convert to grayscale for face detection
-    gray = cv2.cvtColor(image_arr, cv2.COLOR_BGR2GRAY)
-    
-    # Detect faces
-    faces = face_cascade.detectMultiScale(gray, 1.1, 4)
-    
-    if len(faces) > 0:
-        # For demo purposes, return random emotion values
-        # In a real app, you'd use a proper emotion classifier here
-        return {
-            "success": True,
-            "face_detected": True,
-            "emotions": {
-                "angry": np.random.random() * 0.2,
-                "disgust": np.random.random() * 0.1,
-                "fear": np.random.random() * 0.1,
-                "happy": np.random.random() * 0.5,
-                "sad": np.random.random() * 0.2,
-                "surprise": np.random.random() * 0.2,
-                "neutral": np.random.random() * 0.4
+    try:
+        # Process image with DeepFace
+        result = DeepFace.analyze(image_arr, 
+                                actions=['emotion'],
+                                enforce_detection=False)
+        
+        # Handle multiple faces by taking first one
+        if isinstance(result, list):
+            result = result[0]
+        
+        # Extract face region coordinates
+        face_region = result.get('region', {})
+        x, y = face_region.get('x', 0), face_region.get('y', 0)
+        w, h = face_region.get('w', 0), face_region.get('h', 0)
+        
+        # Crop the face if detected
+        if w > 0 and h > 0:
+            # crop and encode detected face
+            face = image.crop((x, y, x + w, y + h))
+            
+            # Convert face to base64
+            face_bytes = io.BytesIO()
+            face.save(face_bytes, format='JPEG')
+            face_base64 = base64.b64encode(face_bytes.getvalue()).decode('utf-8')
+            
+            # normalize emotion scores to 0-1 range
+            emotions = result['emotion']
+            total = sum(emotions.values())
+            normalized_emotions = {
+                emotion: round(score / total, 3)
+                for emotion, score in emotions.items()
             }
-        }
+            
+            # Sort by intensity (highest first)
+            normalized_emotions = dict(
+                sorted(normalized_emotions.items(), 
+                      key=lambda x: x[1], 
+                      reverse=True)
+            )
+            
+            return {
+                "success": True,
+                "face_detected": True,
+                "face_image": face_base64,
+                "emotions": normalized_emotions
+            }
+    
+    except Exception as e:
+        print(f"Error detecting emotions: {str(e)}")
+        traceback.print_exc()
     
     return {
         "success": True,
@@ -69,6 +91,7 @@ def detect_emotions(image):
 
 @app.route("/api/detect-emotion", methods=['POST'])
 def detect_emotion():
+    """Endpoint to detect emotions in uploaded images"""
     if 'image' not in request.json:
         return jsonify({
             "success": False,
@@ -76,12 +99,12 @@ def detect_emotion():
         }), 400
     
     try:
-        # Decode the base64 image
+        # Parse base64 image data
         image_data = request.json['image'].split(',')[1] if ',' in request.json['image'] else request.json['image']
         image_bytes = base64.b64decode(image_data)
         image = Image.open(io.BytesIO(image_bytes))
         
-        # Convert to RGB if not already
+        # Ensure RGB format
         if image.mode != 'RGB':
             image = image.convert('RGB')
         
@@ -104,10 +127,12 @@ client = Neuphonic(api_key=api_key)
 
 @app.route("/api/python")
 def hello_world():
+    """Simple health check endpoint"""
     return "Hello, World!"
 
 @app.route("/api/tts", methods=['POST'])
 def text_to_speech():
+    """Converts text to speech using Neuphonic API"""
     try:
         data = request.get_json()
         text = data.get('text', '')
@@ -119,27 +144,23 @@ def text_to_speech():
 
         print(f"Processing TTS request - text: {text}, voice: {voice}, speed: {speed}")
 
-        # Get SSE client and configure it
+        # Generate audio using Neuphonic
         sse = client.tts.SSEClient()
-        sse.speed = speed  # Set speed on the client
-        response = sse.send(text)  # Send just the text
+        sse.speed = speed
+        response = sse.send(text)
         
-        # Create a temporary file to save the audio
+        # Save audio to temporary buffer
         temp_file = io.BytesIO()
-        
-        # Save the audio stream to the temporary file
         save_audio(response, temp_file)
         
-        # Debug info
+        # Debug audio generation
         temp_file.seek(0)
         audio_data = temp_file.read()
         print(f"Generated audio size: {len(audio_data)} bytes")
-        print(f"First 4 bytes: {audio_data[:4]}")
         
-        # Reset file pointer for sending
         temp_file.seek(0)
         
-        # Send the audio file directly with explicit headers
+        # Return audio file with CORS headers
         response = send_file(
             temp_file,
             mimetype='audio/wav',
@@ -147,18 +168,18 @@ def text_to_speech():
             download_name='speech.wav'
         )
         
-        # Add CORS headers explicitly
         response.headers['Access-Control-Allow-Origin'] = '*'
         response.headers['Access-Control-Allow-Headers'] = '*'
         return response
     
     except Exception as e:
         print("TTS Error:", str(e))
-        print("Traceback:", traceback.format_exc())
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/test", methods=['GET'])
 def test_endpoint():
+    """Health check endpoint for emotion detection API"""
     return jsonify({"status": "ok", "message": "Emotion detection API is running"})
 
 if __name__ == "__main__":
