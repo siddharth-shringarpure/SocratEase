@@ -1,3 +1,4 @@
+# SocratEase
 <p align="center">
   <a href="https://nextjs-flask-starter.vercel.app/">
     <img src="https://assets.vercel.com/image/upload/v1588805858/repositories/vercel/logo.png" height="96">
