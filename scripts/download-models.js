@@ -5,19 +5,19 @@ const path = require('path');
 const models = [
   {
     name: 'tiny_face_detector_model-weights_manifest.json',
-    url: 'https://github.com/justadudewhohacks/face-api.js/raw/master/weights/tiny_face_detector_model-weights_manifest.json'
+    url: 'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/tiny_face_detector_model-weights_manifest.json'
   },
   {
     name: 'tiny_face_detector_model-shard1',
-    url: 'https://github.com/justadudewhohacks/face-api.js/raw/master/weights/tiny_face_detector_model-shard1'
+    url: 'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/tiny_face_detector_model-shard1'
   },
   {
     name: 'face_expression_model-weights_manifest.json',
-    url: 'https://github.com/justadudewhohacks/face-api.js/raw/master/weights/face_expression_model-weights_manifest.json'
+    url: 'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/face_expression_model-weights_manifest.json'
   },
   {
     name: 'face_expression_model-shard1',
-    url: 'https://github.com/justadudewhohacks/face-api.js/raw/master/weights/face_expression_model-shard1'
+    url: 'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights/face_expression_model-shard1'
   }
 ];
 
@@ -32,6 +32,10 @@ const downloadFile = (url, dest) => {
   return new Promise((resolve, reject) => {
     const file = fs.createWriteStream(dest);
     https.get(url, response => {
+      if (response.statusCode !== 200) {
+        reject(new Error(`Failed to download ${url}: ${response.statusCode}`));
+        return;
+      }
       response.pipe(file);
       file.on('finish', () => {
         file.close();
@@ -48,9 +52,15 @@ const downloadModels = async () => {
   for (const model of models) {
     const dest = path.join(modelsDir, model.name);
     console.log(`Downloading ${model.name}...`);
-    await downloadFile(model.url, dest);
+    try {
+      await downloadFile(model.url, dest);
+      console.log(`Successfully downloaded ${model.name}`);
+    } catch (error) {
+      console.error(`Error downloading ${model.name}:`, error);
+      process.exit(1);
+    }
   }
   console.log('All models downloaded successfully!');
 };
 
-downloadModels().catch(console.error); 
+downloadModels(); 
