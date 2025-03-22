@@ -39,3 +39,15 @@ __pycache__
 .venv/
 *.pyc
 venv/
+
+# env
+.env
+
+# outputs
+*.wav
+*.mp3
+*.ogg
+*.m4a
+*.flac
+*.aac
+*.webm
