@@ -51,3 +51,7 @@ venv/
 *.flac
 *.aac
 *.webm
+
+# models
+api/model/
+api/models/
