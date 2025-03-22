@@ -6,6 +6,7 @@ from pyneuphonic import Neuphonic, save_audio
 import io
 from dotenv import load_dotenv
 import traceback
+import whisper  # Add import for Whisper
 
 # Debug information about Python environment
 print("Python executable:", sys.executable)
@@ -25,6 +26,9 @@ api_key = os.environ.get('NEUPHONIC_API_KEY')
 if not api_key:
     raise ValueError("NEUPHONIC_API_KEY not found in environment variables")
 client = Neuphonic(api_key=api_key)
+
+# Initialize Whisper model
+model = whisper.load_model("base")  # You can choose "tiny", "base", "small", "medium", or "large"
 
 @app.route("/api/python")
 def hello_world():
@@ -78,6 +82,33 @@ def text_to_speech():
     
     except Exception as e:
         print("TTS Error:", str(e))
+        print("Traceback:", traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/speech2text', methods=['POST'])
+def transcribe():
+    """Converts speech audio to text using Whisper model"""
+    try:
+        temp_file = "temp_audio.wav"
+
+        if 'file' in request.files:
+            file = request.files['file']
+            file.save(temp_file)
+
+        elif request.data:
+            with open(temp_file, "wb") as f:
+                f.write(request.data)
+
+        else:
+            return jsonify({"error": "No audio data received"}), 400
+
+        result = model.transcribe(temp_file)
+        os.remove(temp_file)  
+
+        return jsonify({"text": result["text"]})
+    
+    except Exception as e:
+        print("Speech-to-Text Error:", str(e))
         print("Traceback:", traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
