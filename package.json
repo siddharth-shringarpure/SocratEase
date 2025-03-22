@@ -8,7 +8,8 @@
     "dev": "node scripts/dev.js",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "download-models": "node scripts/download-models.js"
   },
   "dependencies": {
     "@radix-ui/react-label": "^2.1.2",
@@ -20,6 +21,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "concurrently": "^8.0.1",
+    "face-api.js": "^0.22.2",
     "lucide-react": "^0.483.0",
     "next": "14.1.0",
     "react": "^18.3.1",
