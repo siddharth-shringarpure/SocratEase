@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Blueprint, request, jsonify
 from flask_cors import CORS
 import numpy as np
 import torch
@@ -8,7 +8,7 @@ import base64
 from facenet_pytorch import MTCNN
 from transformers import AutoFeatureExtractor, AutoModelForImageClassification, AutoConfig
 
-app = Flask(__name__)
+app = Blueprint('emotion_detection', __name__)
 CORS(app)
 
 # Set device to GPU if available, otherwise use CPU
@@ -88,7 +88,7 @@ def detect_emotions(image):
         "emotions": {}
     }
 
-@app.route('/api/detect-emotion', methods=['POST'])
+@app.route('/detect-emotion', methods=['POST'])
 def detect_emotion():
     if 'image' not in request.json:
         return jsonify({
@@ -116,7 +116,4 @@ def detect_emotion():
         return jsonify({
             "success": False,
             "error": str(e)
-        }), 500
-
-if __name__ == '__main__':
-    app.run(debug=True, port=5000) 
+        }), 500 

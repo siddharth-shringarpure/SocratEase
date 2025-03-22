@@ -6,6 +6,10 @@ from pyneuphonic import Neuphonic, save_audio
 import io
 from dotenv import load_dotenv
 import traceback
+import numpy as np
+import base64
+from PIL import Image
+import cv2  # OpenCV for face detection
 
 # Debug information about Python environment
 print("Python executable:", sys.executable)
@@ -18,7 +22,79 @@ print("Environment variables:", dict(os.environ))
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+
+# Load OpenCV's pre-trained face detector
+face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+print("Face detector loaded successfully!")
+
+def detect_emotions(image):
+    """
+    A simple face detector that returns random emotion values.
+    In a real app, you'd use a proper emotion detection model.
+    """
+    # Convert PIL Image to numpy array for OpenCV
+    image_arr = np.array(image)
+    # Convert RGB to BGR (OpenCV format)
+    image_arr = image_arr[:, :, ::-1].copy()
+    
+    # Convert to grayscale for face detection
+    gray = cv2.cvtColor(image_arr, cv2.COLOR_BGR2GRAY)
+    
+    # Detect faces
+    faces = face_cascade.detectMultiScale(gray, 1.1, 4)
+    
+    if len(faces) > 0:
+        # For demo purposes, return random emotion values
+        # In a real app, you'd use a proper emotion classifier here
+        return {
+            "success": True,
+            "face_detected": True,
+            "emotions": {
+                "angry": np.random.random() * 0.2,
+                "disgust": np.random.random() * 0.1,
+                "fear": np.random.random() * 0.1,
+                "happy": np.random.random() * 0.5,
+                "sad": np.random.random() * 0.2,
+                "surprise": np.random.random() * 0.2,
+                "neutral": np.random.random() * 0.4
+            }
+        }
+    
+    return {
+        "success": True,
+        "face_detected": False,
+        "emotions": {}
+    }
+
+@app.route("/api/detect-emotion", methods=['POST'])
+def detect_emotion():
+    if 'image' not in request.json:
+        return jsonify({
+            "success": False,
+            "error": "No image data provided"
+        }), 400
+    
+    try:
+        # Decode the base64 image
+        image_data = request.json['image'].split(',')[1] if ',' in request.json['image'] else request.json['image']
+        image_bytes = base64.b64decode(image_data)
+        image = Image.open(io.BytesIO(image_bytes))
+        
+        # Convert to RGB if not already
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        
+        # Process the image
+        result = detect_emotions(image)
+        return jsonify(result)
+    
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 
 # Initialize Neuphonic client with API key from environment
 api_key = os.environ.get('NEUPHONIC_API_KEY')
@@ -81,6 +157,10 @@ def text_to_speech():
         print("Traceback:", traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/test", methods=['GET'])
+def test_endpoint():
+    return jsonify({"status": "ok", "message": "Emotion detection API is running"})
+
 if __name__ == "__main__":
     port = int(os.environ.get('FLASK_RUN_PORT', 5328))
-    app.run(debug=True, port=port)
+    app.run(debug=True, host='0.0.0.0', port=port)
