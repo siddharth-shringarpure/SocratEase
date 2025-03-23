@@ -25,6 +25,7 @@ export default function CameraPage() {
   const [uploadedVideo, setUploadedVideo] = useState<string | null>(null);
   const [uploadedAudio, setUploadedAudio] = useState<string | null>(null);
   const [separateAudioRecording, setSeparateAudioRecording] = useState(false);
+  const [gazeDirection, setGazeDirection] = useState<string>("center");
   const [emotions, setEmotions] = useState<Emotions>({
     neutral: 0,
     happy: 0,
@@ -47,9 +48,11 @@ export default function CameraPage() {
   const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const lowPassNodeRef = useRef<BiquadFilterNode | null>(null);
   const highPassNodeRef = useRef<BiquadFilterNode | null>(null);
+  const [recordingDuration, setRecordingDuration] = useState<number>(0);
+  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const detectEmotions = async () => {
-    if (!videoRef.current || !canvasRef.current || isProcessing) return;
+  const detectCombined = async () => {
+    if (!videoRef.current || !canvasRef.current || isProcessing || isRecording) return;
 
     try {
       setIsProcessing(true);
@@ -72,58 +75,150 @@ export default function CameraPage() {
       ctx.drawImage(videoRef.current, 0, 0);
       const imageData = canvas.toDataURL("image/jpeg", 0.8);
 
-      // Send to backend API with better error handling
-      try {
-        const response = await fetch(
-          "http://localhost:5328/api/detect-emotion",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Accept: "application/json",
-            },
-            body: JSON.stringify({ image: imageData }),
-          }
-        );
-
-        if (!response.ok) {
-          if (response.status === 0) {
-            throw new Error("Cannot connect to server. Is it running?");
-          }
-          const errorText = await response.text();
-          throw new Error(`Server error (${response.status}): ${errorText}`);
+      // Send to combined backend API
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:5328"}/api/detect-combined`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({ image: imageData }),
         }
+      );
 
-        const result = await response.json();
-        if (result.success && result.face_detected) {
-          setEmotions(result.emotions);
+      if (!response.ok) {
+        throw new Error("Failed to process frame");
+      }
 
-          // Draw face detection results if needed
-          if (canvasRef.current) {
-            const ctx = canvasRef.current.getContext("2d");
-            ctx?.clearRect(
-              0,
-              0,
-              canvasRef.current.width,
-              canvasRef.current.height
+      const result = await response.json();
+      
+      if (result.success && result.face_detected) {
+        // Update emotions
+        setEmotions(result.emotions);
+        
+        // Update gaze
+        if (result.gaze) {
+          setGazeDirection(result.gaze.direction);
+          
+          // Update canvas with gaze visualization
+          const video = videoRef.current;
+          const canvas = canvasRef.current;
+          
+          // Get the display size
+          const displayRect = video.getBoundingClientRect();
+          const displayWidth = displayRect.width;
+          const displayHeight = displayRect.height;
+
+          // Update canvas size if needed
+          if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+            canvas.width = displayWidth;
+            canvas.height = displayHeight;
+          }
+
+          // If recording, clear the canvas and return
+          if (isRecording) {
+            const overlayCtx = canvas.getContext("2d");
+            if (overlayCtx) {
+              overlayCtx.clearRect(0, 0, displayWidth, displayHeight);
+            }
+            return;
+          }
+
+          // Calculate scaling factors
+          const scaleX = displayWidth / video.videoWidth;
+          const scaleY = displayHeight / video.videoHeight;
+          const scale = Math.min(scaleX, scaleY);
+
+          // Calculate centering offsets
+          const offsetX = (displayWidth - (video.videoWidth * scale)) / 2;
+          const offsetY = (displayHeight - (video.videoHeight * scale)) / 2;
+
+          // Get overlay context
+          const overlayCtx = canvas.getContext("2d", { willReadFrequently: true });
+          if (!overlayCtx) return;
+
+          // Clear previous drawings
+          overlayCtx.clearRect(0, 0, displayWidth, displayHeight);
+
+          // Set up transform for proper scaling and centering
+          overlayCtx.save();
+          overlayCtx.translate(offsetX, offsetY);
+          overlayCtx.scale(scale, scale);
+
+          // Draw minimal face outline
+          if (result.gaze.landmarks) {
+            overlayCtx.strokeStyle = "rgba(255, 255, 255, 0.3)"; // Very subtle white outline
+            overlayCtx.lineWidth = 1;
+            
+            // Draw face outline using selected landmarks
+            const faceOutlinePoints = result.gaze.landmarks.filter((_: [number, number], index: number) => 
+              // Only use points that form the face outline
+              [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109].includes(index)
             );
-            // You could draw the detected face box here if needed
+
+            if (faceOutlinePoints.length > 0) {
+              overlayCtx.beginPath();
+              overlayCtx.moveTo(
+                faceOutlinePoints[0][0] * video.videoWidth,
+                faceOutlinePoints[0][1] * video.videoHeight
+              );
+              
+              faceOutlinePoints.forEach((point: [number, number]) => {
+                overlayCtx.lineTo(
+                  point[0] * video.videoWidth,
+                  point[1] * video.videoHeight
+                );
+              });
+              
+              overlayCtx.closePath();
+              overlayCtx.stroke();
+            }
           }
-        } else if (!result.face_detected) {
-          console.log("No face detected in frame");
+
+          // Draw minimal gaze indicator
+          if (result.gaze.gaze_arrow) {
+            const { start, end } = result.gaze.gaze_arrow;
+            overlayCtx.strokeStyle = "rgba(255, 255, 255, 0.4)"; // Subtle white
+            overlayCtx.lineWidth = 2;
+
+            // Draw a simple dot at the eye center
+            overlayCtx.beginPath();
+            overlayCtx.arc(
+              start.x * video.videoWidth,
+              start.y * video.videoHeight,
+              3,
+              0,
+              2 * Math.PI
+            );
+            overlayCtx.fill();
+
+            // Draw a small line indicating direction
+            overlayCtx.beginPath();
+            overlayCtx.moveTo(start.x * video.videoWidth, start.y * video.videoHeight);
+            overlayCtx.lineTo(end.x * video.videoWidth, end.y * video.videoHeight);
+            overlayCtx.stroke();
+          }
+
+          // Draw minimal gaze direction text
+          overlayCtx.font = "16px system-ui"; // Smaller, system font
+          overlayCtx.textBaseline = "top";
+          const text = result.gaze.direction.toUpperCase();
+          
+          overlayCtx.fillStyle = "rgba(255, 255, 255, 0.5)";
+          overlayCtx.fillText(text, 10, 10);
+
+          // Restore the original transform
+          overlayCtx.restore();
         }
-      } catch (error: unknown) {
-        if (error instanceof Error) {
-          throw new Error(`API Error: ${error.message}`);
-        }
-        throw new Error("API Error: An unknown error occurred");
       }
     } catch (error) {
-      console.error("Error detecting emotions:", error);
+      console.error("Error in combined detection:", error);
       setBackendError(
         error instanceof Error
           ? error.message
-          : "Failed to process image. Please try again."
+          : "Failed to process frame. Please try again."
       );
     } finally {
       setIsProcessing(false);
@@ -146,16 +241,30 @@ export default function CameraPage() {
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.onloadedmetadata = () => {
-          if (videoRef.current) {
-            videoRef.current.play();
-          }
-        };
+        // Wait for video to be ready
+        await new Promise((resolve) => {
+          if (!videoRef.current) return;
+          videoRef.current.onloadedmetadata = () => {
+            if (videoRef.current) {
+              videoRef.current.play();
+              resolve(true);
+            }
+          };
+        });
+
+        // Initialize canvas size
+        if (canvasRef.current && videoRef.current) {
+          const videoRect = videoRef.current.getBoundingClientRect();
+          canvasRef.current.width = videoRect.width;
+          canvasRef.current.height = videoRect.height;
+        }
       }
+      
       streamRef.current = stream;
       setIsStreaming(true);
 
-      intervalRef.current = setInterval(detectEmotions, 500);
+      // Start detection loop with combined detection
+      intervalRef.current = setInterval(detectCombined, 100);
     } catch (error) {
       console.error("Error accessing camera:", error);
       alert(
@@ -237,7 +346,16 @@ export default function CameraPage() {
     
     try {
       setRecordingError(null);
+      setRecordingDuration(0);
       
+      // Clear the canvas when starting recording
+      if (canvasRef.current) {
+        const ctx = canvasRef.current.getContext('2d');
+        if (ctx) {
+          ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+        }
+      }
+
       // Check supported MIME types for MP4
       const mimeTypes = [
         'video/mp4;codecs=avc1.42E01E,mp4a.40.2',  // H.264 + AAC
@@ -260,12 +378,12 @@ export default function CameraPage() {
       // High quality settings for MP4
       const options = {
         mimeType: selectedMimeType,
-        videoBitsPerSecond: 8000000,  // 8 Mbps for high quality video
+        videoBitsPerSecond: 8000000,
         audioBitsPerSecond: 320000,
-        videoKeyFrameInterval: 1000,   // Key frame every second
-        videoQuality: 1.0,            // Maximum quality setting
-        audioSampleRate: 44100,       // High sample rate
-        audioChannelCount: 2          // Stereo audio
+        videoKeyFrameInterval: 1000,
+        videoQuality: 1.0,
+        audioSampleRate: 44100,
+        audioChannelCount: 2
       };
       
       const mediaRecorder = new MediaRecorder(streamRef.current, options);
@@ -280,6 +398,12 @@ export default function CameraPage() {
       };
 
       mediaRecorder.onstop = async () => {
+        // Clear recording timer
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+
         const videoBlob = new Blob(chunksRef.current, { type: 'video/mp4' });
         
         const formData = new FormData();
@@ -311,8 +435,13 @@ export default function CameraPage() {
         }
       };
       
-      mediaRecorder.start(100);  // Collect data every 100ms for smoother recording
+      mediaRecorder.start(100);
       setIsRecording(true);
+
+      // Start recording timer
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingDuration(prev => prev + 1);
+      }, 1000);
       
     } catch (error) {
       console.error('Error starting recording:', error);
@@ -325,6 +454,30 @@ export default function CameraPage() {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
     }
+  };
+
+  // Add cleanup for recording timer in useEffect
+  useEffect(() => {
+    testApiConnection();
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+      }
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+      }
+    };
+  }, []);
+
+  // Format recording duration
+  const formatDuration = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
   return (
@@ -342,36 +495,55 @@ export default function CameraPage() {
               autoPlay
               playsInline
               muted={isRecording}
-              className="w-full h-full object-cover"
+              className="absolute top-0 left-0 w-full h-full object-contain"
             />
             <canvas
               ref={canvasRef}
               className="absolute top-0 left-0 w-full h-full"
+              style={{ 
+                pointerEvents: 'none',
+                zIndex: 10,
+                display: isRecording ? 'none' : 'block'
+              }}
             />
+            {isRecording && (
+              <div className="absolute top-4 right-4 bg-red-500 text-white px-3 py-1 rounded-full flex items-center gap-2">
+                <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
+                <span>{formatDuration(recordingDuration)}</span>
+              </div>
+            )}
           </div>
-          <Button
-            onClick={isStreaming ? stopCamera : startCamera}
-            variant={isStreaming ? "destructive" : "default"}
-            className="w-32"
-          >
-            {isStreaming ? "Stop Camera" : "Start Camera"}
-          </Button>
 
-          {isStreaming && (
-            <Button
-              onClick={isRecording ? stopRecording : startRecording}
-              variant={isRecording ? "destructive" : "default"}
-              className="w-32"
-              disabled={!isStreaming || isUploading}
-            >
-              {isRecording ? "Stop Recording" : "Start Recording"}
-            </Button>
-          )}
+          <div className="flex gap-4">
+            {!isRecording && (
+              <Button
+                onClick={isStreaming ? stopCamera : startCamera}
+                variant={isStreaming ? "destructive" : "default"}
+                className="w-32"
+              >
+                {isStreaming ? "Stop Camera" : "Start Camera"}
+              </Button>
+            )}
+
+            {isStreaming && (
+              <Button
+                onClick={isRecording ? stopRecording : startRecording}
+                variant={isRecording ? "destructive" : "default"}
+                className="w-32"
+                disabled={!isStreaming || isUploading}
+              >
+                {isRecording ? "Stop Recording" : "Start Recording"}
+              </Button>
+            )}
+          </div>
 
           {isUploading && (
-            <div className="w-full p-4 bg-primary/10 rounded-lg text-center mt-4 flex items-center justify-center gap-2">
-              <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-              <span className="text-primary">Uploading video...</span>
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+              <div className="bg-white p-8 rounded-lg shadow-lg flex flex-col items-center gap-4">
+                <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+                <p className="text-lg font-semibold">Processing your recording...</p>
+                <p className="text-sm text-gray-500">Please wait while we prepare your video</p>
+              </div>
             </div>
           )}
 
@@ -381,7 +553,7 @@ export default function CameraPage() {
             </div>
           )}
 
-          {isStreaming && Object.keys(emotions).length > 0 && (
+          {isStreaming && !isRecording && Object.keys(emotions).length > 0 && (
             <>
               <div className="w-full p-4 bg-muted rounded-lg">
                 <h3 className="font-semibold mb-2">Detected Emotions:</h3>
@@ -395,7 +567,7 @@ export default function CameraPage() {
                 </div>
               </div>
 
-              <div className="w-full p-4 bg-primary/10 text-primary rounded-lg text-center mt-4">
+              <div className="w-full p-4 bg-primary/10 text-primary rounded-lg text-center">
                 <h3 className="font-semibold mb-1">Dominant Emotion:</h3>
                 <div className="text-2xl font-bold capitalize">
                   {getDominantEmotion(emotions)}

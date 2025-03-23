@@ -40,7 +40,12 @@ logger = logging.getLogger(__name__)
 
 # Initialize Flask app
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+CORS(app, resources={r"/*": {
+    "origins": ["http://localhost:3000"],
+    "methods": ["GET", "POST", "OPTIONS"],
+    "allow_headers": ["Content-Type", "Accept"],
+    "supports_credentials": True
+}})
 
 # Add after the imports
 FILLER_WORDS = [
@@ -456,18 +461,6 @@ def process_frame(frame):
         landmark_drawing_spec=None,
         connection_drawing_spec=mp.solutions.drawing_styles.get_default_face_mesh_iris_connections_style()
     )
-
-    # Determine and draw gaze direction
-    gaze = determine_gaze_direction(face_landmarks)
-    cv2.putText(
-        rgb_frame,
-        f"Gaze: {gaze}",
-        (10, 30),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        1,
-        (255, 255, 255),
-        2
-    )
     
     # Convert back to BGR for OpenCV
     return cv2.cvtColor(rgb_frame, cv2.COLOR_RGB2BGR)
@@ -834,6 +827,202 @@ def serve_file(filename):
         print("Error serving file:", str(e))
         print("Traceback:", traceback.format_exc())
         return jsonify({"error": "File not found"}), 404
+
+@app.route("/api/detect-gaze", methods=['POST'])
+def detect_gaze():
+    """Endpoint to detect gaze direction in uploaded images"""
+    if 'image' not in request.json:
+        return jsonify({
+            "success": False,
+            "error": "No image data provided"
+        }), 400
+    
+    try:
+        # Parse base64 image data
+        image_data = request.json['image'].split(',')[1] if ',' in request.json['image'] else request.json['image']
+        image_bytes = base64.b64decode(image_data)
+        image = Image.open(io.BytesIO(image_bytes))
+        
+        # Ensure RGB format
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+            
+        # Convert PIL Image to numpy array for MediaPipe
+        image_arr = np.array(image)
+        
+        # Create MediaPipe Image
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image_arr)
+        
+        # Detect face landmarks
+        detection_result = detector.detect(mp_image)
+        
+        # If no faces detected, return empty result
+        if not detection_result.face_landmarks:
+            return jsonify({
+                "success": True,
+                "face_detected": False
+            })
+        
+        # Get the first face detected
+        face_landmarks = detection_result.face_landmarks[0]
+        
+        # Get gaze direction
+        gaze_direction = determine_gaze_direction(face_landmarks)
+        
+        # Convert landmarks to normalized coordinates
+        landmarks = [[landmark.x, landmark.y] for landmark in face_landmarks]
+        
+        # Calculate face bounding box
+        x_coords = [landmark.x for landmark in face_landmarks]
+        y_coords = [landmark.y for landmark in face_landmarks]
+        face_box = {
+            "x": min(x_coords),
+            "y": min(y_coords),
+            "width": max(x_coords) - min(x_coords),
+            "height": max(y_coords) - min(y_coords)
+        }
+        
+        # Calculate gaze arrow
+        # Use eye landmarks to create arrow
+        left_eye_center = np.mean([[face_landmarks[33].x, face_landmarks[33].y],  # Outer corner
+                                 [face_landmarks[133].x, face_landmarks[133].y]], axis=0)  # Inner corner
+        right_eye_center = np.mean([[face_landmarks[263].x, face_landmarks[263].y],  # Outer corner
+                                  [face_landmarks[362].x, face_landmarks[362].y]], axis=0)  # Inner corner
+        eye_center = np.mean([left_eye_center, right_eye_center], axis=0)
+        
+        # Calculate arrow end point based on gaze direction
+        arrow_length = 0.1  # Adjust this value to change arrow length
+        arrow_end = eye_center.copy()
+        
+        if "left" in gaze_direction:
+            arrow_end[0] -= arrow_length
+        elif "right" in gaze_direction:
+            arrow_end[0] += arrow_length
+        if "up" in gaze_direction:
+            arrow_end[1] -= arrow_length
+        elif "down" in gaze_direction:
+            arrow_end[1] += arrow_length
+            
+        gaze_arrow = {
+            "start": {"x": float(eye_center[0]), "y": float(eye_center[1])},
+            "end": {"x": float(arrow_end[0]), "y": float(arrow_end[1])}
+        }
+        
+        return jsonify({
+            "success": True,
+            "face_detected": True,
+            "gaze_direction": gaze_direction,
+            "landmarks": landmarks,
+            "face_box": face_box,
+            "gaze_arrow": gaze_arrow
+        })
+        
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route("/api/detect-combined", methods=['POST'])
+def detect_combined():
+    """Endpoint to detect both emotions and gaze direction in a single call"""
+    if 'image' not in request.json:
+        return jsonify({
+            "success": False,
+            "error": "No image data provided"
+        }), 400
+    
+    try:
+        # Parse base64 image data
+        image_data = request.json['image'].split(',')[1] if ',' in request.json['image'] else request.json['image']
+        image_bytes = base64.b64decode(image_data)
+        image = Image.open(io.BytesIO(image_bytes))
+        
+        # Ensure RGB format
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+            
+        # Process emotions
+        emotion_result = detect_emotions(image)
+        
+        # Process gaze
+        image_arr = np.array(image)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image_arr)
+        detection_result = detector.detect(mp_image)
+        
+        # If no faces detected
+        if not detection_result.face_landmarks:
+            return jsonify({
+                "success": True,
+                "face_detected": False,
+                "emotions": {},
+                "gaze": None
+            })
+        
+        # Get the first face detected
+        face_landmarks = detection_result.face_landmarks[0]
+        
+        # Get gaze direction
+        gaze_direction = determine_gaze_direction(face_landmarks)
+        
+        # Convert landmarks to normalized coordinates
+        landmarks = [[landmark.x, landmark.y] for landmark in face_landmarks]
+        
+        # Calculate face bounding box
+        x_coords = [landmark.x for landmark in face_landmarks]
+        y_coords = [landmark.y for landmark in face_landmarks]
+        face_box = {
+            "x": min(x_coords),
+            "y": min(y_coords),
+            "width": max(x_coords) - min(x_coords),
+            "height": max(y_coords) - min(y_coords)
+        }
+        
+        # Calculate gaze arrow
+        left_eye_center = np.mean([[face_landmarks[33].x, face_landmarks[33].y], 
+                                 [face_landmarks[133].x, face_landmarks[133].y]], axis=0)
+        right_eye_center = np.mean([[face_landmarks[263].x, face_landmarks[263].y], 
+                                  [face_landmarks[362].x, face_landmarks[362].y]], axis=0)
+        eye_center = np.mean([left_eye_center, right_eye_center], axis=0)
+        
+        # Calculate arrow end point based on gaze direction
+        arrow_length = 0.1
+        arrow_end = eye_center.copy()
+        
+        if "left" in gaze_direction:
+            arrow_end[0] -= arrow_length
+        elif "right" in gaze_direction:
+            arrow_end[0] += arrow_length
+        if "up" in gaze_direction:
+            arrow_end[1] -= arrow_length
+        elif "down" in gaze_direction:
+            arrow_end[1] += arrow_length
+            
+        gaze_arrow = {
+            "start": {"x": float(eye_center[0]), "y": float(eye_center[1])},
+            "end": {"x": float(arrow_end[0]), "y": float(arrow_end[1])}
+        }
+        
+        return jsonify({
+            "success": True,
+            "face_detected": True,
+            "emotions": emotion_result.get("emotions", {}),
+            "gaze": {
+                "direction": gaze_direction,
+                "landmarks": landmarks,
+                "face_box": face_box,
+                "gaze_arrow": gaze_arrow
+            }
+        })
+        
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
 @app.route('/api/video_feed')
 def video_feed():
     return Response(gen_frames(),
