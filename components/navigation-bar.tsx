@@ -19,7 +19,7 @@ export function NavigationBar() {
     <nav className="border-b">
       <div className="container flex h-16 items-center px-4">
         <Link href="/" className="mr-6 flex items-center space-x-2">
-          <span className="text-xl font-bold">Socratease</span>
+          <span className="text-xl font-bold">SocratEase</span>
         </Link>
         <div className="flex gap-6">
           {navItems.map((item) => (
