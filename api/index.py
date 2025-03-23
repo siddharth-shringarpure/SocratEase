@@ -10,7 +10,7 @@ from mediapipe.tasks.python import vision
 from mediapipe import solutions
 from mediapipe.framework.formats import landmark_pb2
 import logging
-from pyneuphonic import Neuphonic, save_audio
+from pyneuphonic import Neuphonic, save_audio, TTSConfig
 import io
 from dotenv import load_dotenv
 import traceback
@@ -24,6 +24,7 @@ import re
 from itertools import tee
 # import t
 import pickle as pkl
+import json
 # Debug information about Python environment
 print("Python executable:", sys.executable)
 print("Python version:", sys.version)
@@ -44,7 +45,8 @@ CORS(app, resources={r"/*": {
     "origins": ["http://localhost:3000"],
     "methods": ["GET", "POST", "OPTIONS"],
     "allow_headers": ["Content-Type", "Accept"],
-    "supports_credentials": True
+    "supports_credentials": True,
+    "expose_headers": ["Content-Type", "Content-Disposition"]
 }})
 
 # Add after the imports
@@ -58,7 +60,7 @@ FILLER_WORDS = [
     "for sure", "you could say", "the thing is", "it s like", "put it another way", 
     "at least", "as such", "well you know", "i would say", "truth be told", "yeah", "and yeah",
     "um yeah", "um no", "um right", "like literally", "to", "erm", "let s see", "hm", "maybe",
-    "maybe like"
+    "maybe like", "really"
 ]
 
 def ngrams(words, n):
@@ -334,7 +336,7 @@ try:
     detector = vision.FaceLandmarker.create_from_options(options)
     logger.info("Successfully loaded face landmarker model")
 except Exception as e:
-    logger.error(f"Error initializing face landmarker: {str(e)}")
+    logger.error(f"Error initialising face landmarker: {str(e)}")
     traceback.print_exc()
     raise
 
@@ -1027,6 +1029,317 @@ def detect_combined():
 def video_feed():
     return Response(gen_frames(),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route("/api/enhance-audio", methods=['POST', 'OPTIONS'])
+def enhance_audio():
+    """Enhances audio using Neuphonic API"""
+    if request.method == 'OPTIONS':
+        response = app.make_default_options_response()
+        response.headers['Access-Control-Allow-Origin'] = '*'  # Allow all origins for OPTIONS
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Accept'
+        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        return response
+
+    try:
+        logger.info("Starting audio enhancement request")
+        
+        # Default text in case transcription fails
+        default_text = "Thank you for your speech. While we couldn't analyze the specific content, keep practicing your speaking skills regularly. Good communication is a valuable skill that improves with consistent practice."
+        
+        # Set speech speed
+        speech_speed = 1.0
+        
+        # Parse category from request if available
+        practice_category = None
+        try:
+            if request.form and 'category' in request.form:
+                practice_category = request.form.get('category')
+                logger.info(f"Received practice category: {practice_category}")
+            elif request.args and 'category' in request.args:
+                practice_category = request.args.get('category')
+                logger.info(f"Received practice category from query params: {practice_category}")
+        except Exception as e:
+            logger.warning(f"Error parsing category: {str(e)}")
+        
+        # Check for API key first thing
+        api_key = os.environ.get('NEUPHONIC_API_KEY')
+        if not api_key:
+            logger.error("NEUPHONIC_API_KEY not found in environment variables")
+            return jsonify({"error": "TTS API key not configured"}), 500
+        
+        # Initialize client early
+        client = Neuphonic(api_key=api_key)
+        
+        # Attempt to process the audio file, but continue even if it fails
+        analysis = None
+        text = ""
+        
+        try:
+            # Process audio file if present
+            if 'file' in request.files and request.files['file'].filename:
+                temp_dir = os.path.join(os.getcwd(), 'temp')
+                os.makedirs(temp_dir, exist_ok=True)
+                
+                temp_input = os.path.join(temp_dir, "temp_enhance_input.wav")
+                temp_audio = os.path.join(temp_dir, "temp_enhance_audio.mp3")
+                
+                file = request.files['file']
+                logger.info(f"Received file: {file.filename}, mimetype: {file.content_type}")
+                
+                # Save and verify input file
+                file.save(temp_input)
+                input_size = os.path.getsize(temp_input)
+                logger.info(f"Saved input file to {temp_input} (size: {input_size} bytes)")
+                
+                if input_size > 0:
+                    # Convert audio to MP3 format for transcription
+                    logger.info("Converting audio for transcription")
+                    ffmpeg_cmd = [
+                        'ffmpeg',
+                        '-y',
+                        '-i', temp_input,
+                        '-vn',
+                        '-acodec', 'libmp3lame',
+                        '-ar', '16000',
+                        '-ac', '1',
+                        '-b:a', '192k',
+                        '-af', 'highpass=f=50,lowpass=f=15000,volume=2,afftdn=nf=-20',
+                        temp_audio
+                    ]
+                    try:
+                        subprocess.run(ffmpeg_cmd, check=True, capture_output=True, timeout=30)
+                        
+                        if os.path.exists(temp_audio) and os.path.getsize(temp_audio) > 0:
+                            # Transcribe the audio
+                            logger.info("Transcribing audio")
+                            text = transcribe_long_audio(temp_audio)
+                            
+                            if text:
+                                # Analyze the text
+                                logger.info(f"Analyzing transcribed text (length: {len(text)})")
+                                analysis = analyse_filler_words(text)
+                    except Exception as conversion_error:
+                        logger.error(f"Audio processing error (continuing anyway): {str(conversion_error)}")
+                    
+                    finally:
+                        # Clean up temp files
+                        for temp_file in [temp_input, temp_audio]:
+                            try:
+                                if os.path.exists(temp_file):
+                                    os.remove(temp_file)
+                            except Exception as e:
+                                logger.error(f"Failed to clean up {temp_file}: {str(e)}")
+        
+        except Exception as file_error:
+            logger.error(f"File processing error (continuing anyway): {str(file_error)}")
+        
+        # Default category-specific feedback (used when no analysis available)
+        category_default_feedback = {
+            "persuasive": "This was a persuasive speech practice. Remember to use concrete evidence, address counterarguments, and maintain a confident tone.",
+            "emotive": "This was an emotive speech practice. Keep using appropriate emotional language and matching your tone to the emotions you express.",
+            "public-speaking": "This was a public speaking practice. Focus on clear projection, engaging body language, and structured points.",
+            "rizzing": "This was a charismatic conversation practice. Stay confident and authentic while using appropriate humor and social cues.",
+            "basic-conversations": "This was a casual conversation practice. Keep the conversation flowing naturally with open-ended questions.",
+            "formal-conversations": "This was a formal conversation practice. Maintain professional language and be concise and clear.",
+            "debating": "This was a debate practice. Present logical arguments, listen to counterpoints, and support claims with evidence.",
+            "storytelling": "This was a storytelling practice. Focus on clear narrative structure, descriptive language, and audience engagement."
+        }
+        
+        # If we have valid analysis, create customized summary
+        enhanced_text = default_text
+        metrics_data = {
+            "total_words": 0,
+            "unique_words": 0,
+            "vocabulary_score": 0,
+            "logical_flow_score": 0,
+            "filler_percentage": 0,
+            "practice_category": practice_category or "unknown"
+        }
+        
+        if analysis:
+            # Create a cohesive summary speech based on analysis
+            filler_comment = ""
+            if analysis['filler_percentage'] >= 18:
+                filler_comment = "I noticed you used quite a few filler words in your speech. Try to be more mindful of these."
+            elif analysis['filler_percentage'] >= 12:
+                filler_comment = "You had some filler words in your speech. With practice, you can reduce these further."
+            elif analysis['filler_percentage'] >= 7:
+                filler_comment = "Your filler word usage was moderate. Keep practicing to improve."
+            elif analysis['filler_percentage'] >= 3:
+                filler_comment = "You did a good job minimizing filler words. Keep it up!"
+            else:
+                filler_comment = "Excellent work! You used almost no filler words in your speech."
+                
+            # Vocabulary diversity comment
+            diversity_comment = ""
+            ttr_level = analysis['ttr_analysis']['diversity_level']
+            if ttr_level == "very high":
+                diversity_comment = "Your vocabulary was exceptionally diverse and rich."
+            elif ttr_level == "high":
+                diversity_comment = "You used a strong variety of words throughout your speech."
+            elif ttr_level == "average":
+                diversity_comment = "Your vocabulary diversity was good, with room to incorporate more varied terms."
+            elif ttr_level == "low":
+                diversity_comment = "Consider expanding your vocabulary to make your speech more engaging."
+            else:
+                diversity_comment = "Try to use a wider range of words to enhance your speech's impact."
+                
+            # Logical flow comment
+            flow_comment = ""
+            flow_score = analysis['logical_flow']['score']
+            if flow_score >= 80:
+                flow_comment = "Your ideas flowed together excellently, creating a cohesive narrative."
+            elif flow_score >= 60:
+                flow_comment = "Your speech had good logical progression between points."
+            elif flow_score >= 40:
+                flow_comment = "The logical flow was adequate, but could use stronger transitions between ideas."
+            elif flow_score >= 20:
+                flow_comment = "Work on strengthening the connections between your points for better flow."
+            else:
+                flow_comment = "Focus on organizing your thoughts more logically when speaking."
+                
+            # Category-specific advice based on mode
+            category_specific_advice = ""
+            if practice_category in category_default_feedback:
+                if practice_category == "persuasive":
+                    if flow_score < 60:
+                        category_specific_advice = "For persuasive speaking, try to strengthen your logical flow with clearer transitions between arguments."
+                    elif analysis['filler_percentage'] > 10:
+                        category_specific_advice = "When persuading others, reducing filler words can make your arguments sound more authoritative."
+                    else:
+                        category_specific_advice = "Your persuasive speech is developing well. Continue using evidence and addressing counterarguments."
+                
+                elif practice_category == "emotive":
+                    if ttr_level in ["low", "very low"]:
+                        category_specific_advice = "For emotive speaking, try using more varied emotional vocabulary to express your feelings with greater nuance."
+                    else:
+                        category_specific_advice = "Your emotive speech conveys feelings well. Keep matching your tone to the emotions you're expressing."
+                
+                elif practice_category == "public-speaking":
+                    if analysis['filler_percentage'] > 7:
+                        category_specific_advice = "For public speaking, work on reducing filler words to sound more polished and confident on stage."
+                    elif flow_score < 60:
+                        category_specific_advice = "Public speaking benefits from clear structure. Try outlining your main points more clearly."
+                    else:
+                        category_specific_advice = "Your public speaking skills are developing well. Keep focusing on clear projection and structure."
+                
+                elif practice_category == "rizzing":
+                    category_specific_advice = "In charismatic conversation, your natural flow is important. Stay authentic while working on smooth transitions."
+                
+                elif practice_category == "basic-conversations":
+                    if analysis['filler_percentage'] > 15:
+                        category_specific_advice = "Even in casual conversation, reducing filler words can help you sound more articulate."
+                    else:
+                        category_specific_advice = "Your casual conversation style is progressing well. Continue asking open-ended questions."
+                
+                elif practice_category == "formal-conversations":
+                    if ttr_level in ["low", "very low"]:
+                        category_specific_advice = "In formal settings, a more diverse vocabulary can enhance your professionalism."
+                    else:
+                        category_specific_advice = "Your formal communication style is developing appropriately. Maintain your concise and clear approach."
+                
+                elif practice_category == "debating":
+                    if flow_score < 70:
+                        category_specific_advice = "Debate requires strong logical flow. Focus on connecting your arguments more clearly."
+                    else:
+                        category_specific_advice = "Your debate skills show good logical reasoning. Continue supporting claims with evidence."
+                
+                elif practice_category == "storytelling":
+                    if ttr_level in ["low", "very low"]:
+                        category_specific_advice = "Storytelling benefits from rich, descriptive language. Try expanding your vocabulary."
+                    elif flow_score < 60:
+                        category_specific_advice = "Stories need a clear narrative arc. Work on transitions between parts of your story."
+                    else:
+                        category_specific_advice = "Your storytelling is developing well. Keep focusing on narrative structure and audience engagement."
+            else:
+                # Generic advice if category unknown
+                category_specific_advice = "Continue practicing your speaking skills regularly to improve over time."
+            
+            # Create a cohesive summary with category-specific additions
+            enhanced_text = f"""Here's a summary of your {practice_category or 'speech'} practice analysis.
+            
+            {filler_comment} {diversity_comment} {flow_comment}
+            
+            {category_specific_advice}
+            
+            You said {analysis['total_words']} total words, and about {analysis['filler_percentage']}% of them were filler words.
+            
+            Keep practicing to improve your {practice_category or 'speaking'} skills!"""
+            
+            # Update metrics
+            metrics_data = {
+                "total_words": analysis['total_words'],
+                "unique_words": analysis['ttr_analysis']['unique_words'],
+                "vocabulary_score": analysis['ttr_analysis']['ttr'],
+                "logical_flow_score": analysis['logical_flow']['score'],
+                "filler_percentage": analysis['filler_percentage'],
+                "practice_category": practice_category or "unknown"
+            }
+        elif practice_category in category_default_feedback:
+            # If no analysis but we have a category, use the default feedback for that category
+            enhanced_text = f"""Here's some feedback on your {practice_category} practice.
+            
+            {category_default_feedback[practice_category]}
+            
+            While I couldn't analyze the specific content of your speech, remember that regular practice is key to improvement.
+            
+            Keep practicing to enhance your {practice_category} skills!"""
+        
+        # Generate speech from enhanced text - THIS MUST NOT FAIL
+        logger.info(f"Generating TTS with speed: {speech_speed}")
+        
+        try:
+            # Create a fresh client 
+            sse = client.tts.SSEClient()
+            sse.speed = speech_speed
+            
+            # Send request with timeout handling
+            response = sse.send(enhanced_text)
+            
+            # Save to temporary buffer
+            temp_buffer = io.BytesIO()
+            save_audio(response, temp_buffer)
+            temp_buffer.seek(0)
+            
+            # Verify audio was generated
+            buffer_size = temp_buffer.getbuffer().nbytes
+            logger.info(f"Generated audio size: {buffer_size} bytes")
+            
+            if buffer_size == 0:
+                raise Exception("Generated empty audio file")
+                
+            # Return audio file with metrics in headers
+            response = send_file(
+                temp_buffer,
+                mimetype='audio/wav',
+                as_attachment=True,
+                download_name='enhanced_speech.wav'
+            )
+            
+            # Add analysis data to headers
+            metrics_json = json.dumps(metrics_data)
+            
+            # Ensure CORS headers are set
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Accept'
+            response.headers['Access-Control-Expose-Headers'] = 'Content-Type, Content-Disposition, X-Speech-Metrics, X-Practice-Category'
+            response.headers['X-Speech-Metrics'] = metrics_json
+            response.headers['X-Practice-Category'] = practice_category or "unknown"
+            
+            logger.info("Successfully generated and returned enhanced audio")
+            return response
+            
+        except Exception as tts_error:
+            logger.error(f"TTS generation error: {str(tts_error)}")
+            traceback.print_exc()
+            return jsonify({"error": f"Speech generation failed: {str(tts_error)}"}), 500
+        
+    except Exception as e:
+        logger.error(f"Speech Enhancement Error: {str(e)}")
+        traceback.print_exc()
+        error_response = jsonify({"error": f"Speech enhancement failed: {str(e)}"})
+        error_response.headers['Access-Control-Allow-Origin'] = '*'
+        return error_response, 500
 
 if __name__ == "__main__":
     port = int(os.environ.get('FLASK_RUN_PORT', 5328))
