@@ -12,7 +12,10 @@ import base64
 from PIL import Image
 from deepface import DeepFace
 import subprocess  # Add at the top with other imports
-
+import re
+from itertools import tee
+# import t
+import pickle as pkl
 # Debug information about Python environment
 print("Python executable:", sys.executable)
 print("Python version:", sys.version)
@@ -25,6 +28,179 @@ load_dotenv()
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+
+# Add after the imports
+FILLER_WORDS = [
+    "um", "uh", "like", "you know", "well", "so", "actually", "basically", "i mean", 
+    "right", "okay", "er", "hmm", "literally", "anyway", "of course", "i guess", 
+    "in other words", "obviously", "to be honest", "just", "seriously", "you see", 
+    "i suppose", "frankly", "well, i mean", "at the end of the day", "to tell the truth", 
+    "as it were", "kind of", "sort of", "in a way", "that is", "as a matter of fact", 
+    "in fact", "like i said", "more or less", "i don't know", "basically speaking", 
+    "for sure", "you could say", "the thing is", "it s like", "put it another way", 
+    "at least", "as such", "well you know", "i would say", "truth be told", "yeah", "and yeah",
+    "um yeah", "um no", "um right", "like literally", "to", "erm", "let s see", "hm", "maybe",
+    "maybe like"
+]
+
+def ngrams(words, n):
+    output = []
+    for i in range(len(words) - n + 1):
+        output.append(' '.join(words[i:i + n]))
+    return output
+
+def analyse_filler_words(text):
+    words = re.findall(r'\b\w+\b', text.lower())
+    total_words = len(words)
+    
+    # Count filler words
+    filler_count = 0
+    found_fillers: list[str] = []
+    
+    for word in words:
+        if word in FILLER_WORDS:
+            filler_count += 1
+            found_fillers.append(word)
+    
+    bigrams = ngrams(words, 2)
+    for bigram in bigrams:
+        if bigram in FILLER_WORDS:
+            filler_count += 1
+            found_fillers.append(bigram)
+    
+    trigrams = ngrams(words, 3)
+    for trigram in trigrams:
+        if trigram in FILLER_WORDS:
+            filler_count += 1
+            found_fillers.append(trigram)
+    
+    quadgrams = ngrams(words, 4)
+    for quadgram in quadgrams:
+        if quadgram in FILLER_WORDS:
+            filler_count += 1
+            found_fillers.append(quadgram)
+    
+    # Calculate metrics
+    filler_percentage = (filler_count / total_words * 100) if total_words > 0 else 0
+    
+    # Determine emoji based on percentage
+    if filler_percentage <= 3:
+        emoji = "🎯"  # Excellent
+    elif filler_percentage <= 7:
+        emoji = "👍"  # Good
+    elif filler_percentage <= 12:
+        emoji = "💭"  # Think about it
+    elif filler_percentage <= 18:
+        emoji = "⚠️"  # Warning
+    else:
+        emoji = "😞"  # Needs work
+    
+    # Calculate TTR
+    ttr_analysis = calculate_ttr(text)
+    
+    # Get logical flow score
+    try:
+        logical_score = logical_flow(text)
+        # Convert logical score to percentage and determine emoji
+        logical_percentage = logical_score * 100
+        if logical_percentage >= 80:
+            logical_emoji = "🌠"  # Excellent flow
+        elif logical_percentage >= 60:
+            logical_emoji = "🌊"  # Good flow
+        elif logical_percentage >= 40:
+            logical_emoji = "🔄"  # Average flow
+        elif logical_percentage >= 20:
+            logical_emoji = "🌫️"  # Needs improvement
+        else:
+            logical_emoji = "🌪️"  # Poor flow
+    except Exception as e:
+        print(f"Error calculating logical flow: {str(e)}")
+        logical_percentage = 0
+        logical_emoji = "❓"
+    
+    return {
+        "total_words": total_words,
+        "filler_count": filler_count,
+        "filler_percentage": round(filler_percentage, 2),
+        "found_fillers": found_fillers,
+        "filler_emoji": emoji,
+        "ttr_analysis": ttr_analysis,
+        "logical_flow": {
+            "score": round(logical_percentage, 2),
+            "emoji": logical_emoji
+        }
+    }
+
+def calculate_ttr(text):
+    words = re.findall(r'\b\w+\b', text.lower())
+    total_words: int = len(words)
+    unique_words: int = len(set(words))
+    ttr: float = (unique_words / total_words) * 100 if total_words > 0 else 0
+    
+    # Determine diversity level and emoji
+    if ttr >= 80:
+        diversity = "very high"
+        emoji = "🌟"
+    elif ttr >= 60:
+        diversity = "high"
+        emoji = "✨"
+    elif ttr >= 40:
+        diversity = "average"
+        emoji = "💫"
+    elif ttr >= 20:
+        diversity = "low"
+        emoji = "📝"
+    else:
+        diversity = "very low"
+        emoji = "📚"
+        
+    return {
+        "ttr": round(ttr, 2),
+        "unique_words": unique_words,
+        "diversity_level": diversity,
+        "emoji": emoji
+    }
+
+def logical_flow(text):
+    try:
+        model_path = os.path.join(os.path.dirname(__file__), 'model', 'logical_model.pk')
+        print(f"Attempting to load model from: {model_path}")
+        
+        if not os.path.exists(model_path):
+            print(f"Model file not found at: {model_path}")
+            return 0.0
+        
+        # Check PyTorch version
+        import torch
+        print(f"PyTorch version: {torch.__version__}")
+        
+        # Check transformers version
+        import transformers
+        print(f"Transformers version: {transformers.__version__}")
+            
+        with open(model_path, 'rb') as f:
+            try:
+                logical_model = pkl.load(f)
+                print("Successfully loaded logical flow model")
+            except RuntimeError as e:
+                if "register_pytree_node()" in str(e):
+                    print("Version mismatch detected between PyTorch and transformers")
+                    print("Please ensure compatible versions are installed")
+                    return 0.0
+                raise
+        
+        print(f"Making prediction for text of length: {len(text)}")
+        pred: list[dict] = logical_model.predict(text)
+        score: float = pred[0]['score']
+        print(f"Logical flow prediction result: {score}")
+        
+        return score
+    except Exception as e:
+        print(f"Error in logical flow prediction: {str(e)}")
+        print(f"Error type: {type(e).__name__}")
+        print("Full traceback:")
+        traceback.print_exc()
+        return 0.0  # Return 0 as fallback to indicate failure
 
 def detect_emotions(image: Image) -> dict:
     """
@@ -253,7 +429,92 @@ def upload_video():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/speech2text', methods=['POST'])
+def transcribe_long_audio(audio_path, max_duration=30):
+    """
+    Transcribe longer audio files by splitting into chunks if needed.
+    Returns the full transcription text.
+    """
+    try:
+        # Get audio duration using ffprobe
+        duration_cmd = [
+            'ffprobe', 
+            '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            audio_path
+        ]
+        duration_result = subprocess.run(duration_cmd, capture_output=True, text=True)
+        duration = float(duration_result.stdout.strip())
+        print(f"Audio duration: {duration} seconds")
+        
+        # If short enough, transcribe directly
+        if duration <= max_duration:
+            result = model.transcribe(audio_path)
+            return result.get("text", "")
+            
+        # For longer files, process in chunks
+        chunks = []
+        for start in range(0, int(duration), max_duration):
+            chunk_path = f"{audio_path}_chunk_{start}.mp3"
+            
+            # Extract chunk with 1-second overlap
+            chunk_cmd = [
+                'ffmpeg', '-y',
+                '-i', audio_path,
+                '-ss', str(max(0, start - 1)),  # Start 1 second earlier for overlap
+                '-t', str(max_duration + 1),     # Add 1 second for overlap
+                '-acodec', 'libmp3lame',
+                '-ar', '16000',
+                '-ac', '1',
+                chunk_path
+            ]
+            subprocess.run(chunk_cmd, capture_output=True)
+            
+            try:
+                # Transcribe chunk with timeout
+                import signal
+                from contextlib import contextmanager
+                
+                @contextmanager
+                def timeout(seconds):
+                    def handler(signum, frame):
+                        raise TimeoutError(f"Transcription timed out after {seconds} seconds")
+                    
+                    # Set the timeout handler
+                    signal.signal(signal.SIGALRM, handler)
+                    signal.alarm(seconds)
+                    try:
+                        yield
+                    finally:
+                        signal.alarm(0)
+                
+                # Try to transcribe with timeout
+                with timeout(max_duration * 2):  # Allow 2x duration for processing
+                    result = model.transcribe(chunk_path)
+                    chunk_text = result.get("text", "").strip()
+                    if chunk_text:
+                        chunks.append(chunk_text)
+                    print(f"Chunk {start}-{start+max_duration}: {len(chunk_text)} chars")
+            
+            except TimeoutError as e:
+                print(f"Chunk timeout: {str(e)}")
+                continue
+            finally:
+                # Clean up chunk file
+                if os.path.exists(chunk_path):
+                    os.remove(chunk_path)
+        
+        # Combine all chunks
+        full_text = " ".join(chunks)
+        print(f"Combined {len(chunks)} chunks, total length: {len(full_text)} chars")
+        return full_text
+        
+    except Exception as e:
+        print(f"Error in long audio transcription: {str(e)}")
+        traceback.print_exc()
+        return None
+
+@app.route("/api/speech2text", methods=['POST'])
 def transcribe():
     """Converts speech audio to text using Whisper model"""
     try:
@@ -272,74 +533,62 @@ def transcribe():
             return jsonify({"error": "No selected file"}), 400
             
         print(f"Received file: {file.filename}, mimetype: {file.content_type}")
+        # Save and verify input file
         file.save(temp_input)
-        print(f"Saved input file to {temp_input}")
+        input_size = os.path.getsize(temp_input)
+        print(f"Saved input file to {temp_input} (size: {input_size} bytes)")
+        
+        if input_size == 0:
+            raise Exception("Input file is empty")
 
         try:
-            # First, check if input file exists and has content
-            if not os.path.exists(temp_input) or os.path.getsize(temp_input) == 0:
-                raise Exception("Input file is empty or not created")
-
-            print("Extracting audio from video...")
-            # Extract audio with quality improvements
-            result = subprocess.run([
+            # Extract audio
+            ffmpeg_cmd = [
                 'ffmpeg',
                 '-y',
                 '-i', temp_input,
-                '-vn',  # No video
-                '-acodec', 'libmp3lame',  # MP3 codec
-                '-ar', '44100',  # 16kHz sampling rate
-                '-ac', '1',      # Mono
-                '-b:a', '192k',  # Bitrate
-                '-af', 'highpass=f=50,lowpass=f=15000,volume=2,afftdn=nf=-20',  # Audio filters
+                '-vn',
+                '-acodec', 'libmp3lame',
+                '-ar', '16000',
+                '-ac', '1',
+                '-b:a', '192k',
+                '-af', 'highpass=f=50,lowpass=f=15000,volume=2,afftdn=nf=-20',
                 temp_audio
-            ], check=True, capture_output=True, text=True)
+            ]
+            subprocess.run(ffmpeg_cmd, check=True, capture_output=True)
             
-            print("Audio extraction complete")
-            print("FFmpeg stdout:", result.stdout)
-            print("FFmpeg stderr:", result.stderr)
-
-            if not os.path.exists(temp_audio) or os.path.getsize(temp_audio) == 0:
-                raise Exception("FFmpeg failed to extract audio")
-
-            print("Starting Whisper transcription...")
-            try:
-                transcription = model.transcribe(
-                    temp_audio,
-                    language="en",
-                    initial_prompt="This is a recording of someone speaking clearly.",
-                    condition_on_previous_text=False,
-                )
-                
-                if not transcription or not transcription.get("text"):
-                    raise Exception("No transcription generated")
-                
-                return jsonify({"text": transcription.get("text", "")})
-            except Exception as e:
-                print("Whisper Error:", str(e))
-                print("Traceback:", traceback.format_exc())
-                return jsonify({"error": "Failed to process audio with Whisper. Please try again."}), 500
-
-        except subprocess.CalledProcessError as e:
-            print("FFmpeg Error:", e.stderr)
-            return jsonify({"error": f"Failed to process audio file: {e.stderr}"}), 500
+            if not os.path.exists(temp_audio):
+                raise Exception("Failed to create audio file")
+            
+            # Use the new transcription function
+            text = transcribe_long_audio(temp_audio)
+            if not text:
+                raise Exception("Failed to transcribe audio")
+            
+            # Analyze the text
+            analysis = analyse_filler_words(text)
+            
+            return jsonify({
+                "text": text,
+                "analysis": analysis
+            })
+            
         except Exception as e:
-            print("Processing Error:", str(e))
-            print("Traceback:", traceback.format_exc())
-            return jsonify({"error": f"Failed to process audio: {str(e)}"}), 500
+            print(f"Processing Error: {str(e)}")
+            traceback.print_exc()
+            return jsonify({"error": str(e)}), 500
         finally:
             # Clean up temp files
             for temp_file in [temp_input, temp_audio]:
                 try:
                     if os.path.exists(temp_file):
                         os.remove(temp_file)
-                        print(f"Cleaned up {temp_file}")
                 except Exception as e:
                     print(f"Failed to clean up {temp_file}: {str(e)}")
-
+                    
     except Exception as e:
-        print("General Error:", str(e))
-        print("Traceback:", traceback.format_exc())
+        print(f"General Error: {str(e)}")
+        traceback.print_exc()
         return jsonify({"error": "Failed to process request"}), 500
 
 @app.route("/api/test", methods=['GET'])
