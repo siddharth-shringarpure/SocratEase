@@ -1,79 +1,53 @@
 # SocratEase
-<p align="center">
-  <a href="https://nextjs-flask-starter.vercel.app/">
-    <img src="https://assets.vercel.com/image/upload/v1588805858/repositories/vercel/logo.png" height="96">
-    <h3 align="center">Next.js Flask Starter</h3>
-  </a>
-</p>
+## SocratEase: Speak smarter with AI-powered feedback.
 
-<p align="center">Simple Next.js boilerplate that uses <a href="https://flask.palletsprojects.com/">Flask</a> as the API backend.</p>
+SocratEase is a magical platform designed to turn your speech videos into insightful feedback through advanced AI models. Whether you're preparing for a job interview, perfecting your public speaking skills, or mastering your first date conversations, SocratEase analyses your speech, facial expressions, and engagement levels to offer valuable, personalised feedback.
 
-<br/>
+Using a combination of digital image processing, natural language processing (NLP), and audio signal processing, SocratEase evaluates your communication on three key dimensions: visual cues (like facial expressions and eye contact), auditory features (such as speech fluency), and textual analysis (for logical coherence and engagement). By combining these analyses through a late-fusion multimodal approach, SocratEase provides an integrated understanding of your speaking style and areas for improvement.
 
-## Introduction
+This approach, detailed in [D'Mello 2015](https://dl.acm.org/doi/pdf/10.1145/2682899), allows us to process each modality independently before combining them to generate actionable feedback; the final result is a comprehensive evaluation of your communication skills, helping you feel more confident and prepared for any speaking situation.
 
-This is a hybrid Next.js + Python app that uses Next.js as the frontend and Flask as the API backend. One great use case of this is to write Next.js apps that use Python AI libraries on the backend.
+ Features
 
-## How It Works
+🎥 **Video Feed Analysis** – Evaluate user engagement through eye contact and facial expressions
+   - 👀 **Eye Contact Detection** – Improve users' engagement in conversations and speeches using [GazeTracking](https://github.com/antoinelame/GazeTracking)'s method
+   - 😀 **Facial Expression Analysis** – Identifies emotions and microexpressions by using techniques from [Edlitera](https://www.edlitera.com/blog/posts/emotion-detection-in-video)
 
-The Python/Flask server is mapped into to Next.js app under `/api/`.
+🎙️ **Audio Feed Analysis** – Focuses on fluency features in speech.  
+   - 🗣 **Fluency Metrics** – Implements techniques from [Eusipco 2023](https://eurasip.org/Proceedings/Eusipco/Eusipco2023/pdfs/0000231.pdf).  
+- 📊 **Dataset Utilisation** – Uses the [Avalinguo-Audio-Set](https://github.com/agrija9/Avalinguo-Audio-Set).  
+- 🔎 **Speech Features Extracted**:
+    - ⏱ **Words per Minute**  
+    - 📖 **Lexical Density** (Token Type Ratio)  
+    - 🔕 **Zero Crossing Rate** (silent pauses)  
+    - 🎵 **MFCC** (Mel-frequency cepstral coefficients)
+    - The features are extracted, **trained on an extreme gradient boosting (XGB) model** [Chen 2016](https://dl.acm.org/doi/10.1145/2939672.2939785) to predict the **fluency**
+        - The XGB model is trained using Randomised CV model selection, achieving 93% overall F1-Score
+        - Alongside other features, fluency is also used as a feedback to the user
 
-This is implemented using [`next.config.js` rewrites](https://github.com/vercel/examples/blob/main/python/nextjs-flask/next.config.js) to map any request to `/api/:path*` to the Flask API, which is hosted in the `/api` folder.
+📝 **Communication Transcript Analysis** – Examines speech patterns, coherence, and engagement.  
+   - ✍️ **Tonality Analysis** – Utilises [tone analysis dataset](https://www.kaggle.com/datasets/sameedatif/tone-analysis) + [
+3gpp-embedding-model-v0](https://huggingface.co/iris49/3gpp-embedding-model-v0) + MLP
+   - 🚫 **Filler Word Frequency** – Computes corpus occurrence in the speech's transcript.
+   - 📚 **Vocabulary Sophistication** – Assesses Type Token Ratio (TTR) to see how much the words are repeated
+   - 🔄 **Logical Flow Detection** – Leverages [roberta-large_overall-coherence](https://huggingface.co/SushantGautam/roberta-large_overall-coherence) to use logistic regression in finding the coherence of the speech
+   - 🎭 **Engagement Prediction** – Uses **Flesch-Kincaid Readability** to estimate listener interests  
+## Implementation
+## Tech Stack
+- Frontend: React, Next.js
+- Backend: Flask, Python
+- AI & CV & NLP & Signal: SVM, NLTK, re, Librosa, Torch, Neuphonic
+- Integrations: NPM
 
-On localhost, the rewrite will be made to the `127.0.0.1:5328` port, which is where the Flask server is running.
+## What’s Next for SocratEase?  
+As we continue enhancing our analysis system, we plan to introduce new intelligent features and improvements, including:  
 
-In production, the Flask server is hosted as [Python serverless functions](https://vercel.com/docs/concepts/functions/serverless-functions/runtimes/python) on Vercel.
+🌍 **Multilingual Speech & Text Support** – Expanding accessibility for diverse linguistic backgrounds.  
 
-## Demo
+🎯 **Enhanced Emotion & Engagement Detection** – Refining sentiment analysis and listener interest prediction for more accurate insights.  
 
-https://nextjs-flask-starter.vercel.app/
+🎙️ **Real-Time Fluency Feedback** – Providing instant analysis of speech fluency with actionable recommendations.  
 
-## Deploy Your Own
+🕵️ **Context-Aware Coherence Evaluation** – Improving logical flow detection with more robust reasoning models.  
 
-You can clone & deploy it to Vercel with one click:
-
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?demo-title=Next.js%20Flask%20Starter&demo-description=Simple%20Next.js%20boilerplate%20that%20uses%20Flask%20as%20the%20API%20backend.&demo-url=https%3A%2F%2Fnextjs-flask-starter.vercel.app%2F&demo-image=%2F%2Fimages.ctfassets.net%2Fe5382hct74si%2F795TzKM3irWu6KBCUPpPz%2F44e0c6622097b1eea9b48f732bf75d08%2FCleanShot_2023-05-23_at_12.02.15.png&project-name=Next.js%20Flask%20Starter&repository-name=nextjs-flask-starter&repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Fexamples%2Ftree%2Fmain%2Fpython%2Fnextjs-flask&from=vercel-examples-repo)
-
-## Developing Locally
-
-You can clone & create this repo with the following command
-
-```bash
-npx create-next-app nextjs-flask --example "https://github.com/vercel/examples/tree/main/python/nextjs-flask"
-```
-
-## Getting Started
-
-First, install the dependencies:
-
-```bash
-npm install
-# or
-yarn
-# or
-pnpm install
-```
-
-Then, run the development server:
-
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-The Flask server will be running on [http://127.0.0.1:5328](http://127.0.0.1:5328) – feel free to change the port in `package.json` (you'll also need to update it in `next.config.js`).
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-- [Flask Documentation](https://flask.palletsprojects.com/en/1.1.x/) - learn about Flask features and API.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js/) - your feedback and contributions are welcome!
+📊 **Comprehensive Communication Analytics** – Introducing detailed performance tracking and insights for continuous improvement.  
