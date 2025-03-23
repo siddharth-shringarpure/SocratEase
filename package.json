@@ -23,6 +23,7 @@
     "clsx": "^2.1.1",
     "concurrently": "^8.0.1",
     "face-api.js": "^0.20.0",
+    "framer-motion": "^12.5.0",
     "lucide-react": "^0.483.0",
     "next": "^14.2.25",
     "react": "^18.3.1",
