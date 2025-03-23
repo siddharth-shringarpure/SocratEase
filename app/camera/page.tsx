@@ -43,6 +43,10 @@ export default function CameraPage() {
   const audioRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const router = useRouter();
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const lowPassNodeRef = useRef<BiquadFilterNode | null>(null);
+  const highPassNodeRef = useRef<BiquadFilterNode | null>(null);
 
   const detectEmotions = async () => {
     if (!videoRef.current || !canvasRef.current || isProcessing) return;
@@ -130,8 +134,16 @@ export default function CameraPage() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: true,
-        audio: true  // Add audio capture
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          sampleRate: 44100,
+          channelCount: 2,
+          sampleSize: 16
+        }
       });
+
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.onloadedmetadata = () => {
@@ -143,7 +155,6 @@ export default function CameraPage() {
       streamRef.current = stream;
       setIsStreaming(true);
 
-      // Increased interval to 500ms to reduce server load
       intervalRef.current = setInterval(detectEmotions, 500);
     } catch (error) {
       console.error("Error accessing camera:", error);
@@ -230,8 +241,7 @@ export default function CameraPage() {
       // Check supported MIME types for MP4
       const mimeTypes = [
         'video/mp4;codecs=avc1.42E01E,mp4a.40.2',  // H.264 + AAC
-        'video/mp4',
-        'video/x-matroska;codecs=avc1,mp4a'
+        'video/mp4'
       ];
       
       let selectedMimeType = '';
@@ -247,11 +257,15 @@ export default function CameraPage() {
         throw new Error('No supported MP4 video format found');
       }
       
-      // Set higher bitrates for better quality
+      // High quality settings for MP4
       const options = {
         mimeType: selectedMimeType,
-        videoBitsPerSecond: 2500000,  // 2.5 Mbps video
-        audioBitsPerSecond: 128000    // 128 kbps audio
+        videoBitsPerSecond: 8000000,  // 8 Mbps for high quality video
+        audioBitsPerSecond: 320000,
+        videoKeyFrameInterval: 1000,   // Key frame every second
+        videoQuality: 1.0,            // Maximum quality setting
+        audioSampleRate: 44100,       // High sample rate
+        audioChannelCount: 2          // Stereo audio
       };
       
       const mediaRecorder = new MediaRecorder(streamRef.current, options);
@@ -297,7 +311,7 @@ export default function CameraPage() {
         }
       };
       
-      mediaRecorder.start(1000);
+      mediaRecorder.start(100);  // Collect data every 100ms for smoother recording
       setIsRecording(true);
       
     } catch (error) {
@@ -327,6 +341,7 @@ export default function CameraPage() {
               ref={videoRef}
               autoPlay
               playsInline
+              muted={isRecording}
               className="w-full h-full object-cover"
             />
             <canvas

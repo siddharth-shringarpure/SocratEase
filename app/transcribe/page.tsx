@@ -24,7 +24,7 @@ export default function TranscribePage() {
         video: true,
         audio: {
           channelCount: 1,         // Mono audio
-          sampleRate: 16000,       // 16kHz sample rate
+          sampleRate: 44100,       // 44.1kHz sample rate
           echoCancellation: true,  // Reduce echo
           noiseSuppression: true,  // Reduce background noise
           autoGainControl: true    // Automatic volume adjustment
@@ -40,7 +40,7 @@ export default function TranscribePage() {
       const options = {
         mimeType: 'video/mp4',
         videoBitsPerSecond: 2500000,  // 2.5 Mbps
-        audioBitsPerSecond: 128000    // 128 kbps
+        audioBitsPerSecond: 320000    // 320 kbps
       };
 
       const mediaRecorder = new MediaRecorder(stream, options);

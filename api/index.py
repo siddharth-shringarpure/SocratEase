@@ -230,10 +230,7 @@ def upload_video():
                     '-i', video_path,
                     '-vn',  # No video
                     '-acodec', 'pcm_s16le',  # 16-bit PCM
-                    '-ar', '44100',  # 44.1kHz sampling rate
                     '-ac', '2',  # Stereo
-                    '-af', 'highpass=f=50,lowpass=f=15000,volume=2,afftdn=nf=-20',  # Audio filters for better quality
-                    '-b:a', '192k',  # Higher bitrate
                     audio_path
                 ], check=True, capture_output=True)
             except subprocess.CalledProcessError as e:
@@ -291,7 +288,7 @@ def transcribe():
                 '-i', temp_input,
                 '-vn',  # No video
                 '-acodec', 'libmp3lame',  # MP3 codec
-                '-ar', '16000',  # 16kHz sampling rate
+                '-ar', '44100',  # 16kHz sampling rate
                 '-ac', '1',      # Mono
                 '-b:a', '192k',  # Bitrate
                 '-af', 'highpass=f=50,lowpass=f=15000,volume=2,afftdn=nf=-20',  # Audio filters
