@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useRouter } from "next/navigation";
 
 type Emotions = {
   neutral: number;
@@ -18,6 +19,12 @@ export default function CameraPage() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [backendError, setBackendError] = useState<string | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [recordingError, setRecordingError] = useState<string | null>(null);
+  const [uploadedVideo, setUploadedVideo] = useState<string | null>(null);
+  const [uploadedAudio, setUploadedAudio] = useState<string | null>(null);
+  const [separateAudioRecording, setSeparateAudioRecording] = useState(false);
   const [emotions, setEmotions] = useState<Emotions>({
     neutral: 0,
     happy: 0,
@@ -31,6 +38,11 @@ export default function CameraPage() {
   const streamRef = useRef<MediaStream | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const audioRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const router = useRouter();
 
   const detectEmotions = async () => {
     if (!videoRef.current || !canvasRef.current || isProcessing) return;
@@ -116,7 +128,10 @@ export default function CameraPage() {
 
   const startCamera = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: true,
+        audio: true  // Add audio capture
+      });
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.onloadedmetadata = () => {
@@ -133,7 +148,7 @@ export default function CameraPage() {
     } catch (error) {
       console.error("Error accessing camera:", error);
       alert(
-        "Failed to access camera. Please make sure you have granted camera permissions."
+        "Failed to access camera or microphone. Please make sure you have granted necessary permissions."
       );
     }
   };
@@ -206,6 +221,98 @@ export default function CameraPage() {
     return maxEmotion;
   };
 
+  const startRecording = async () => {
+    if (!streamRef.current) return;
+    
+    try {
+      setRecordingError(null);
+      
+      // Check supported MIME types for MP4
+      const mimeTypes = [
+        'video/mp4;codecs=avc1.42E01E,mp4a.40.2',  // H.264 + AAC
+        'video/mp4',
+        'video/x-matroska;codecs=avc1,mp4a'
+      ];
+      
+      let selectedMimeType = '';
+      for (const mimeType of mimeTypes) {
+        if (MediaRecorder.isTypeSupported(mimeType)) {
+          console.log('Using MIME type:', mimeType);
+          selectedMimeType = mimeType;
+          break;
+        }
+      }
+      
+      if (!selectedMimeType) {
+        throw new Error('No supported MP4 video format found');
+      }
+      
+      // Set higher bitrates for better quality
+      const options = {
+        mimeType: selectedMimeType,
+        videoBitsPerSecond: 2500000,  // 2.5 Mbps video
+        audioBitsPerSecond: 128000    // 128 kbps audio
+      };
+      
+      const mediaRecorder = new MediaRecorder(streamRef.current, options);
+      
+      mediaRecorderRef.current = mediaRecorder;
+      chunksRef.current = [];
+      
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          chunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const videoBlob = new Blob(chunksRef.current, { type: 'video/mp4' });
+        
+        const formData = new FormData();
+        formData.append('video', videoBlob, 'recording.mp4');
+        
+        try {
+          setIsUploading(true);
+          const response = await fetch('http://localhost:5328/api/upload-video', {
+            method: 'POST',
+            body: formData,
+          });
+          
+          if (!response.ok) {
+            throw new Error(`Upload failed: ${response.statusText}`);
+          }
+          
+          const result = await response.json();
+          console.log('Video uploaded successfully:', result.filename);
+          setUploadedVideo(result.filename);
+          if (result.has_audio) {
+            setUploadedAudio(result.audio_filename);
+          }
+          router.push(`/recordings/${result.filename}${result.has_audio ? `?audio=${result.audio_filename}` : ''}`);
+        } catch (error) {
+          console.error('Error uploading video:', error);
+          setRecordingError(error instanceof Error ? error.message : 'Failed to upload video');
+        } finally {
+          setIsUploading(false);
+        }
+      };
+      
+      mediaRecorder.start(1000);
+      setIsRecording(true);
+      
+    } catch (error) {
+      console.error('Error starting recording:', error);
+      setRecordingError('Failed to start recording. Please check your camera and microphone permissions.');
+    }
+  };
+  
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  };
+
   return (
     <main className="container py-8 flex flex-col items-center">
       <h1 className="text-4xl font-bold mb-8 text-center">Camera Practice</h1>
@@ -234,6 +341,30 @@ export default function CameraPage() {
           >
             {isStreaming ? "Stop Camera" : "Start Camera"}
           </Button>
+
+          {isStreaming && (
+            <Button
+              onClick={isRecording ? stopRecording : startRecording}
+              variant={isRecording ? "destructive" : "default"}
+              className="w-32"
+              disabled={!isStreaming || isUploading}
+            >
+              {isRecording ? "Stop Recording" : "Start Recording"}
+            </Button>
+          )}
+
+          {isUploading && (
+            <div className="w-full p-4 bg-primary/10 rounded-lg text-center mt-4 flex items-center justify-center gap-2">
+              <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              <span className="text-primary">Uploading video...</span>
+            </div>
+          )}
+
+          {recordingError && (
+            <div className="w-full p-4 bg-destructive/10 text-destructive rounded-lg text-center mt-4">
+              {recordingError}
+            </div>
+          )}
 
           {isStreaming && Object.keys(emotions).length > 0 && (
             <>

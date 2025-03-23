@@ -11,6 +11,7 @@ import numpy as np
 import base64
 from PIL import Image
 from deepface import DeepFace
+import subprocess  # Add at the top with other imports
 
 # Debug information about Python environment
 print("Python executable:", sys.executable)
@@ -181,36 +182,203 @@ def text_to_speech():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/upload-video", methods=['POST'])
+def upload_video():
+    """Handles video file uploads and saves them locally"""
+    try:
+        if 'video' not in request.files:
+            return jsonify({"error": "No video file provided"}), 400
+            
+        video_file = request.files['video']
+        
+        if video_file.filename == '':
+            return jsonify({"error": "No selected file"}), 400
+            
+        # Create uploads directory if it doesn't exist
+        upload_dir = os.path.join(os.getcwd(), 'uploads')
+        os.makedirs(upload_dir, exist_ok=True)
+        
+        # Generate unique filename with timestamp
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        video_filename = f"recording_{timestamp}.mp4"
+        audio_filename = f"recording_{timestamp}_audio.wav"
+        video_path = os.path.join(upload_dir, video_filename)
+        audio_path = os.path.join(upload_dir, audio_filename)
+        
+        # Save the video file
+        video_file.save(video_path)
+        
+        # Check if video has audio stream using ffprobe
+        probe_result = subprocess.run([
+            'ffprobe', 
+            '-v', 'error',
+            '-select_streams', 'a:0',
+            '-show_entries', 'stream=codec_type',
+            '-of', 'default=nw=1:nk=1',
+            video_path
+        ], capture_output=True, text=True)
+        
+        has_audio = probe_result.stdout.strip() == 'audio'
+        
+        if has_audio:
+            try:
+                # Extract audio with quality improvements
+                subprocess.run([
+                    'ffmpeg',
+                    '-y',  # Overwrite output file if it exists
+                    '-i', video_path,
+                    '-vn',  # No video
+                    '-acodec', 'pcm_s16le',  # 16-bit PCM
+                    '-ar', '44100',  # 44.1kHz sampling rate
+                    '-ac', '2',  # Stereo
+                    '-af', 'highpass=f=50,lowpass=f=15000,volume=2,afftdn=nf=-20',  # Audio filters for better quality
+                    '-b:a', '192k',  # Higher bitrate
+                    audio_path
+                ], check=True, capture_output=True)
+            except subprocess.CalledProcessError as e:
+                print("FFmpeg error:", e.stderr)
+                has_audio = False
+            except FileNotFoundError:
+                print("FFmpeg not found")
+                has_audio = False
+        
+        return jsonify({
+            "success": True,
+            "message": "Video uploaded successfully",
+            "filename": video_filename,
+            "audio_filename": audio_filename if has_audio else None,
+            "has_audio": has_audio
+        })
+        
+    except Exception as e:
+        print("Video Upload Error:", str(e))
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/speech2text', methods=['POST'])
 def transcribe():
     """Converts speech audio to text using Whisper model"""
     try:
-        temp_file = "temp_audio.wav"
+        print("Starting transcription request...")
+        temp_dir = os.path.join(os.getcwd(), 'temp')
+        os.makedirs(temp_dir, exist_ok=True)
 
-        if 'file' in request.files:
-            file = request.files['file']
-            file.save(temp_file)
+        temp_input = os.path.join(temp_dir, "temp_input.mp4")
+        temp_audio = os.path.join(temp_dir, "temp_audio.mp3")
+        
+        if 'file' not in request.files:
+            return jsonify({"error": "No file provided"}), 400
+            
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({"error": "No selected file"}), 400
+            
+        print(f"Received file: {file.filename}, mimetype: {file.content_type}")
+        file.save(temp_input)
+        print(f"Saved input file to {temp_input}")
 
-        elif request.data:
-            with open(temp_file, "wb") as f:
-                f.write(request.data)
+        try:
+            # First, check if input file exists and has content
+            if not os.path.exists(temp_input) or os.path.getsize(temp_input) == 0:
+                raise Exception("Input file is empty or not created")
 
-        else:
-            return jsonify({"error": "No audio data received"}), 400
+            print("Extracting audio from video...")
+            # Extract audio with quality improvements
+            result = subprocess.run([
+                'ffmpeg',
+                '-y',
+                '-i', temp_input,
+                '-vn',  # No video
+                '-acodec', 'libmp3lame',  # MP3 codec
+                '-ar', '16000',  # 16kHz sampling rate
+                '-ac', '1',      # Mono
+                '-b:a', '192k',  # Bitrate
+                '-af', 'highpass=f=50,lowpass=f=15000,volume=2,afftdn=nf=-20',  # Audio filters
+                temp_audio
+            ], check=True, capture_output=True, text=True)
+            
+            print("Audio extraction complete")
+            print("FFmpeg stdout:", result.stdout)
+            print("FFmpeg stderr:", result.stderr)
 
-        result = model.transcribe(temp_file)
-        os.remove(temp_file)  
+            if not os.path.exists(temp_audio) or os.path.getsize(temp_audio) == 0:
+                raise Exception("FFmpeg failed to extract audio")
 
-        return jsonify({"text": result["text"]})
-    
+            print("Starting Whisper transcription...")
+            try:
+                transcription = model.transcribe(
+                    temp_audio,
+                    language="en",
+                    initial_prompt="This is a recording of someone speaking clearly.",
+                    condition_on_previous_text=False,
+                )
+                
+                if not transcription or not transcription.get("text"):
+                    raise Exception("No transcription generated")
+                
+                return jsonify({"text": transcription.get("text", "")})
+            except Exception as e:
+                print("Whisper Error:", str(e))
+                print("Traceback:", traceback.format_exc())
+                return jsonify({"error": "Failed to process audio with Whisper. Please try again."}), 500
+
+        except subprocess.CalledProcessError as e:
+            print("FFmpeg Error:", e.stderr)
+            return jsonify({"error": f"Failed to process audio file: {e.stderr}"}), 500
+        except Exception as e:
+            print("Processing Error:", str(e))
+            print("Traceback:", traceback.format_exc())
+            return jsonify({"error": f"Failed to process audio: {str(e)}"}), 500
+        finally:
+            # Clean up temp files
+            for temp_file in [temp_input, temp_audio]:
+                try:
+                    if os.path.exists(temp_file):
+                        os.remove(temp_file)
+                        print(f"Cleaned up {temp_file}")
+                except Exception as e:
+                    print(f"Failed to clean up {temp_file}: {str(e)}")
+
     except Exception as e:
-        print("Speech-to-Text Error:", str(e))
+        print("General Error:", str(e))
         print("Traceback:", traceback.format_exc())
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Failed to process request"}), 500
+
 @app.route("/api/test", methods=['GET'])
 def test_endpoint():
     """Health check endpoint for emotion detection API"""
     return jsonify({"status": "ok", "message": "Emotion detection API is running"})
+
+@app.route("/uploads/<path:filename>")
+def serve_file(filename):
+    """Serves files from the uploads directory"""
+    try:
+        upload_dir = os.path.join(os.getcwd(), 'uploads')
+        file_path = os.path.join(upload_dir, filename)
+        
+        if not os.path.exists(file_path):
+            print(f"File not found: {file_path}")
+            return jsonify({"error": "File not found"}), 404
+            
+        # Determine mime type based on extension
+        if filename.endswith('.mp4'):
+            mime_type = 'video/mp4'
+        elif filename.endswith('.wav'):
+            mime_type = 'audio/wav'
+        else:
+            mime_type = 'audio/mpeg'
+        
+        print(f"Serving file: {file_path} with mime type: {mime_type}")
+        return send_file(
+            file_path,
+            mimetype=mime_type,
+            as_attachment=False
+        )
+    except Exception as e:
+        print("Error serving file:", str(e))
+        print("Traceback:", traceback.format_exc())
+        return jsonify({"error": "File not found"}), 404
 
 if __name__ == "__main__":
     port = int(os.environ.get('FLASK_RUN_PORT', 5328))
