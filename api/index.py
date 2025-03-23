@@ -471,48 +471,55 @@ def transcribe_long_audio(audio_path, max_duration=30):
             subprocess.run(chunk_cmd, capture_output=True)
             
             try:
-                # Transcribe chunk with timeout
-                import signal
-                from contextlib import contextmanager
+                # Transcribe chunk with a simpler timeout mechanism
+                import threading
+                import queue
                 
-                @contextmanager
-                def timeout(seconds):
-                    def handler(signum, frame):
-                        raise TimeoutError(f"Transcription timed out after {seconds} seconds")
-                    
-                    # Set the timeout handler
-                    signal.signal(signal.SIGALRM, handler)
-                    signal.alarm(seconds)
-                    try:
-                        yield
-                    finally:
-                        signal.alarm(0)
-                
-                # Try to transcribe with timeout
-                with timeout(max_duration * 2):  # Allow 2x duration for processing
+                def transcribe_chunk():
                     result = model.transcribe(chunk_path)
-                    chunk_text = result.get("text", "").strip()
-                    if chunk_text:
-                        chunks.append(chunk_text)
-                    print(f"Chunk {start}-{start+max_duration}: {len(chunk_text)} chars")
-            
-            except TimeoutError as e:
-                print(f"Chunk timeout: {str(e)}")
-                continue
-            finally:
+                    return result.get("text", "")
+                
+                # Create a queue to store the result
+                result_queue = queue.Queue()
+                
+                # Start transcription in a separate thread
+                thread = threading.Thread(target=lambda: result_queue.put(transcribe_chunk()))
+                thread.start()
+                
+                # Wait for result with timeout
+                try:
+                    text = result_queue.get(timeout=30)  # 30 second timeout
+                    chunks.append(text)
+                except queue.Empty:
+                    print(f"Timeout transcribing chunk starting at {start} seconds")
+                    continue
+                
                 # Clean up chunk file
                 if os.path.exists(chunk_path):
                     os.remove(chunk_path)
+                    
+            except Exception as e:
+                print(f"Error processing chunk {start}: {str(e)}")
+                continue
         
-        # Combine all chunks
-        full_text = " ".join(chunks)
-        print(f"Combined {len(chunks)} chunks, total length: {len(full_text)} chars")
-        return full_text
+        # Combine chunks with overlap handling
+        if not chunks:
+            return ""
+            
+        # Join chunks with overlap handling
+        combined_text = " ".join(chunks)
+        # Remove duplicate words at chunk boundaries
+        words = combined_text.split()
+        cleaned_words = []
+        for i, word in enumerate(words):
+            if i == 0 or word != words[i-1]:
+                cleaned_words.append(word)
+        
+        return " ".join(cleaned_words)
         
     except Exception as e:
-        print(f"Error in long audio transcription: {str(e)}")
-        traceback.print_exc()
-        return None
+        print(f"Transcription error: {str(e)}")
+        return ""
 
 @app.route("/api/speech2text", methods=['POST'])
 def transcribe():
