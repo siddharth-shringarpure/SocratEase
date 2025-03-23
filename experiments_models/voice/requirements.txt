@@ -1,0 +1,6 @@
+re==2.2.1
+numpy==1.26.4
+pandas==2.2.3
+nltk==3.9.1
+librosa==0.11.0
+torch==2.6.0
