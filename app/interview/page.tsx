@@ -1,5 +1,5 @@
 "use client";
-
+// TODO: shhhh, definitely not a work in progress!!!
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -68,7 +68,7 @@ export default function InterviewPage() {
           </CardHeader>
           <CardContent>
             <div className="space-y-6">
-              {/* Recording Visualization */}
+              {/* Recording Visualisation */}
               <div className="aspect-[3/2] bg-muted/30 rounded-lg flex items-center justify-center">
                 <div
                   className={`w-24 h-24 rounded-full bg-primary/10 flex items-center justify-center transition-all duration-700 ${

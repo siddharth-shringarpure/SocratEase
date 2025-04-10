@@ -55,6 +55,8 @@ venv/
 # models
 api/model/
 api/models/
+*.task
+*.onnx
 
 # recordings
 uploads/

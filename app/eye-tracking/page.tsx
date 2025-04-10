@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+// Might be broken, not intended for production use. Key features already implemented in the practice page.
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5328";
+import { useEffect, useRef, useState } from "react";
 
 export default function EyeTracking() {
   const imgRef = useRef<HTMLImageElement>(null);
@@ -22,7 +22,7 @@ export default function EyeTracking() {
 
         // Start the video feed
         if (imgRef.current) {
-          imgRef.current.src = `${API_URL}/api/video_feed?t=${Date.now()}`;
+          imgRef.current.src = `/api/video_feed?t=${Date.now()}`;
         }
       } catch (err) {
         console.error("Camera permission error:", err);
@@ -40,7 +40,7 @@ export default function EyeTracking() {
     if (hasPermission) {
       interval = setInterval(() => {
         if (imgRef.current) {
-          imgRef.current.src = `${API_URL}/api/video_feed?t=${Date.now()}`;
+          imgRef.current.src = `/api/video_feed?t=${Date.now()}`;
         }
       }, 5000);
     }

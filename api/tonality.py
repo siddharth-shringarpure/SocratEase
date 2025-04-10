@@ -20,6 +20,6 @@ def tonality(text):
     pred = model.predict(x)
     pred = LE.inverse_transform(pred)
     return pred[0]
-pred = tonality("You fucking piece of shit!")
+pred = tonality("Why is debugging code so annoying?")
 
 print(pred)

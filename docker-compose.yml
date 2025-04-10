@@ -1,0 +1,26 @@
+services:
+  backend:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./uploads:/app/uploads # Persists uploads folder
+      - ./temp:/app/temp # Persists temp folder
+      - ./api/models:/app/api/models # Persists model files
+    env_file:
+      - .env
+    environment:
+      - FLASK_APP=api/app.py
+      - FLASK_ENV=production
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      - STORAGE_TYPE=${STORAGE_TYPE:-local}
+      # Only set CUDA_VISIBLE_DEVICES if NVIDIA GPU is available
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-}
+    restart: unless-stopped # Automatically restart if it crashes
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/test"]
+      interval: 30s
+      timeout: 30s
+      retries: 3
+      start_period: 5s

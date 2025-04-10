@@ -3,7 +3,7 @@ from pyneuphonic import Neuphonic, TTSConfig
 from pyneuphonic.player import AudioPlayer
 
 # Load the API key from the environment
-client = Neuphonic(api_key='49b59869a21b9499f55cd4d3bc8680b147d5f1bca42b06e71e204b82bfcbd016.f52b43ef-edbd-4cd5-909c-8535c1ce2591')
+client = Neuphonic(api_key=os.getenv("NEUPHONIC_API_KEY"))
 voices = client.voices.list()
 print("testing")
 for voice in voices:
