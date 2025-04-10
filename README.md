@@ -106,11 +106,12 @@ As we continue enhancing our analysis system, we plan to introduce new intellige
 3. Set up environment variables:
 
    ```bash
-   # Root environment variables
-   cp .env.example .env  # Main backend config and API keys
+   # Copy the example environment file
+   cp .env.example .env
 
-   # Frontend environment variables
-   cp frontend/.env.local.example frontend/.env.local  # Frontend-specific API URL
+   # Edit with your configuration settings
+   # - Neuphonic API Key
+   # - Backend URL
    ```
 
 4. Download required models:

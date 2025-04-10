@@ -1,0 +1,16 @@
+# Ignore Python files and directories
+requirements.txt
+api/
+scripts/download_backend_models.py
+**/*.py
+**/__pycache__
+.venv/
+venv/
+
+# Ignore Docker-related files
+Dockerfile
+docker-compose*.yml
+
+# Other files not needed for frontend
+.git
+README.md 
