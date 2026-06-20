@@ -1,42 +1,41 @@
 """
-This file has not been fully tested, and should not be used in production.
+Experimental S3 and local storage manager.
 
+This file has not been fully tested, and should not be used in production.
 S3 buckets were initially under consideration, though adoption was halted
 and this project does not currently support S3.
-
 This file is present in the repository for future reference.
 """
+import logging
 import os
-import boto3
+import tempfile
 from datetime import datetime, timedelta
+
+import boto3
 from botocore.exceptions import ClientError
 from dotenv import load_dotenv
-import logging
-import tempfile
 
 load_dotenv()
 
 # Configure storage type based on environment
-STORAGE_TYPE = os.getenv('STORAGE_TYPE', 'local')  # 'local' or 's3'
-RETENTION_DAYS = int(os.getenv('VIDEO_RETENTION_DAYS', '1'))  # Default 1 day retention
+STORAGE_TYPE = os.getenv("STORAGE_TYPE", "local")
+RETENTION_DAYS = int(os.getenv("VIDEO_RETENTION_DAYS", "1"))
 
 # S3 configuration
-S3_BUCKET = os.getenv('S3_BUCKET')
-S3_REGION = os.getenv('S3_REGION', 'eu-north-1')
-AWS_ACCESS_KEY = os.getenv('AWS_ACCESS_KEY_ID')
-AWS_SECRET_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
+S3_BUCKET = os.getenv("S3_BUCKET")
+S3_REGION = os.getenv("S3_REGION", "eu-north-1")
+AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 
 # Storage limits (in bytes)
-MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB per file
-MAX_DAILY_UPLOAD = 500 * 1024 * 1024  # 500MB per day
-ALLOWED_EXTENSIONS = {'.mp4', '.wav', '.txt'}  # Restrict file types
+MAX_FILE_SIZE = 100 * 1024 * 1024
+MAX_DAILY_UPLOAD = 500 * 1024 * 1024
+ALLOWED_EXTENSIONS = {".mp4", ".wav", ".txt"}
 
-# Check if we should use the Next.js public directory structure
-UPLOADS_DIR = os.path.join(os.getcwd(), 'uploads')
-PUBLIC_UPLOADS_PATH = os.path.join(os.getcwd(), 'public', 'uploads')
+UPLOADS_DIR = os.path.join(os.getcwd(), "uploads")
+PUBLIC_UPLOADS_PATH = os.path.join(os.getcwd(), "public", "uploads")
 
-# We have multiple upload directories which might cause confusion
-# Check which ones exist and prioritise the public/uploads for Next.js compatibility
+# Prefer the Next.js public directory when it exists
 if os.path.exists(PUBLIC_UPLOADS_PATH):
     UPLOADS_DIR = PUBLIC_UPLOADS_PATH
     print(f"Using Next.js public directory for uploads: {UPLOADS_DIR}")
@@ -45,67 +44,98 @@ else:
 
 logger = logging.getLogger(__name__)
 
+
 class StorageManager:
-    """Manages file storage operations with quota management"""
-    def __init__(self):
-        """Initialise storage backend based on configuration"""
-        logger.info(f"Initialising {STORAGE_TYPE} storage")
-        
-        if STORAGE_TYPE == 's3':
-            # S3 configuration
+    """Manages file storage operations with quota management.
+
+    Attributes:
+        s3: Boto3 S3 client (S3 mode only)
+        daily_upload_volume: Running byte count for today's uploads (S3 mode only)
+        last_upload_date: Date of last recorded upload (S3 mode only)
+    """
+
+    def __init__(self) -> None:
+        """Initialise storage backend based on configuration."""
+        logging.info("Initialising %s storage", STORAGE_TYPE)
+
+        if STORAGE_TYPE == "s3":
             try:
                 self.s3 = boto3.client(
-                    's3',
+                    "s3",
                     region_name=S3_REGION,
                     aws_access_key_id=AWS_ACCESS_KEY,
                     aws_secret_access_key=AWS_SECRET_KEY
                 )
-                # Track daily upload volume
                 self.daily_upload_volume = 0
                 self.last_upload_date = datetime.now().date()
             except Exception as e:
-                logger.error(f"Failed to initialise S3 client: {e}")
+                logging.error("Failed to initialise S3 client: %s", e)
                 raise
         else:
-            # Create directories without checking permissions first
-            for directory in [UPLOADS_DIR, 'temp']:
+            for directory in [UPLOADS_DIR, "temp"]:
                 dir_path = os.path.abspath(directory)
                 try:
                     os.makedirs(dir_path, mode=0o755, exist_ok=True)
-                    logger.info(f"Initialised {directory} directory at {dir_path}")
+                    logging.info("Initialised %s directory at %s", directory, dir_path)
                 except Exception as e:
-                    logger.warning(f"Could not create directory {dir_path}: {e}")
-                    # Continue anyway - we'll handle specific file operations later
-            
-            # Note: We don't check write permissions here anymore to avoid failing at startup
+                    logging.warning("Could not create directory %s: %s", dir_path, e)
 
-    def _check_file_size(self, file_obj):
-        """Check if file size is within limits"""
-        # Get file size
-        if hasattr(file_obj, 'seek') and hasattr(file_obj, 'tell'):
+    def _check_file_size(self, file_obj) -> int:
+        """Check file size is within the allowed limit.
+
+        Args:
+            file_obj: File-like object to inspect
+
+        Returns:
+            Size of the file in bytes
+
+        Raises:
+            ValueError: If file exceeds MAX_FILE_SIZE
+        """
+        if hasattr(file_obj, "seek") and hasattr(file_obj, "tell"):
             pos = file_obj.tell()
             file_obj.seek(0, os.SEEK_END)
             size = file_obj.tell()
-            file_obj.seek(pos)  # Reset position
+            file_obj.seek(pos)
         else:
-            # For files that don't support seek/tell
             size = len(file_obj.read())
-            if hasattr(file_obj, 'seek'):
+            if hasattr(file_obj, "seek"):
                 file_obj.seek(0)
 
         if size > MAX_FILE_SIZE:
-            raise ValueError(f"File too large. Maximum size is {MAX_FILE_SIZE/1024/1024}MB")
+            raise ValueError(
+                f"File too large. Maximum size is {MAX_FILE_SIZE / 1024 / 1024}MB"
+            )
         return size
 
-    def _check_extension(self, filename):
-        """Check if file extension is allowed"""
+    def _check_extension(self, filename: str) -> bool:
+        """Check the file extension is permitted.
+
+        Args:
+            filename: Name of the file to validate
+
+        Returns:
+            True if the extension is allowed
+
+        Raises:
+            ValueError: If the extension is not in ALLOWED_EXTENSIONS
+        """
         ext = os.path.splitext(filename)[1].lower()
         if ext not in ALLOWED_EXTENSIONS:
-            raise ValueError(f"File type not allowed. Allowed types: {ALLOWED_EXTENSIONS}")
+            raise ValueError(
+                f"File type not allowed. Allowed types: {ALLOWED_EXTENSIONS}"
+            )
         return True
 
-    def _update_upload_quota(self, size):
-        """Update and check daily upload quota"""
+    def _update_upload_quota(self, size: int) -> None:
+        """Update and enforce the daily upload quota.
+
+        Args:
+            size: Size in bytes of the new upload
+
+        Raises:
+            ValueError: If adding size would exceed MAX_DAILY_UPLOAD
+        """
         today = datetime.now().date()
         if today != self.last_upload_date:
             self.daily_upload_volume = 0
@@ -113,58 +143,61 @@ class StorageManager:
 
         new_total = self.daily_upload_volume + size
         if new_total > MAX_DAILY_UPLOAD:
-            raise ValueError(f"Daily upload limit ({MAX_DAILY_UPLOAD/1024/1024}MB) exceeded")
-        
+            raise ValueError(
+                f"Daily upload limit ({MAX_DAILY_UPLOAD / 1024 / 1024}MB) exceeded"
+            )
+
         self.daily_upload_volume = new_total
 
-    def save_file(self, file_obj, filename, content_type=None):
-        """Save a file to storage with size and quota checks"""
+    def save_file(self, file_obj, filename: str, content_type: str | None = None) -> str:
+        """Save a file to storage after validating size and extension.
+
+        Args:
+            file_obj: File-like object or Werkzeug FileStorage to save
+            filename: Target filename
+            content_type: MIME type of the file (optional)
+
+        Returns:
+            Path or key under which the file was saved
+
+        Raises:
+            ValueError: If validation fails
+            IOError: If the temporary file cannot be created
+        """
         try:
-            # Validate file
             self._check_extension(filename)
             size = self._check_file_size(file_obj)
 
-            # Use system temp directory which should be writable by all users
-            temp_dir = tempfile.gettempdir()  # usually /tmp on Linux
-            logger.info(f"Using system temp directory: {temp_dir}")
-            
-            # Save to local temp first (needed for processing)
+            temp_dir = tempfile.gettempdir()
+            logging.info("Using system temp directory: %s", temp_dir)
+
             temp_path = os.path.join(temp_dir, filename)
-            logger.info(f"Saving file {filename} to temporary path: {temp_path}")
-            
-            if hasattr(file_obj, 'save'):
-                logger.debug("Using file object's save method")
+            logging.info("Saving file %s to temporary path: %s", filename, temp_path)
+
+            if hasattr(file_obj, "save"):
                 file_obj.save(temp_path)
             else:
-                logger.debug("Using manual file writing")
-                file_obj.seek(0)  # Reset file position to start
-                with open(temp_path, 'wb') as f:
+                file_obj.seek(0)
+                with open(temp_path, "wb") as f:
                     content = file_obj.read()
-                    logger.debug(f"Read {len(content)} bytes from file object")
                     f.write(content)
-                file_obj.seek(0)  # Reset file position again for potential reuse
-            
-            if os.path.exists(temp_path):
-                temp_size = os.path.getsize(temp_path)
-                logger.debug(f"Temporary file created successfully, size: {temp_size} bytes")
-            else:
+                file_obj.seek(0)
+
+            if not os.path.exists(temp_path):
                 raise IOError(f"Failed to create temporary file at {temp_path}")
 
-            if STORAGE_TYPE == 's3':
+            if STORAGE_TYPE == "s3":
                 try:
-                    # Check quota
                     self._update_upload_quota(size)
 
-                    # Upload to S3 with metadata
-                    with open(temp_path, 'rb') as f:
+                    with open(temp_path, "rb") as f:
                         extra_args = {
-                            'ContentType': content_type,
-                            'Metadata': {
-                                'upload_date': datetime.now().isoformat(),
-                                'file_size': str(size)
+                            "ContentType": content_type,
+                            "Metadata": {
+                                "upload_date": datetime.now().isoformat(),
+                                "file_size": str(size)
                             }
                         }
-                        
                         self.s3.upload_fileobj(
                             f,
                             S3_BUCKET,
@@ -173,141 +206,133 @@ class StorageManager:
                         )
                     return f"uploads/{filename}"
                 except Exception as e:
-                    logger.error(f"Error uploading to S3: {e}")
-                    # Don't try to move to uploads dir since we had permission issues
-                    # Just return the temp path which should be accessible
-                    logger.info(f"Using temp file as fallback: {temp_path}")
+                    logging.error("Error uploading to S3: %s", e)
+                    logging.info("Using temp file as fallback: %s", temp_path)
                     return temp_path
             else:
-                # Local storage - just use the temp file path because of permission issues
+                uploads_path = os.path.join(UPLOADS_DIR, filename)
                 try:
-                    # Try to copy to uploads directory, but don't fail if it doesn't work
-                    uploads_path = os.path.join(UPLOADS_DIR, filename)
-                    try:
-                        # Instead of os.rename which requires permissions, try a copy
-                        with open(temp_path, 'rb') as src, open(uploads_path, 'wb') as dst:
-                            dst.write(src.read())
-                        logger.info(f"Successfully copied file to uploads: {uploads_path}")
-                        return uploads_path
-                    except (PermissionError, OSError) as e:
-                        logger.warning(f"Could not copy to uploads directory: {e}")
-                        # Just use the temp file
-                        logger.info(f"Using temp file as storage: {temp_path}")
-                        return temp_path
-                except Exception as e:
-                    logger.warning(f"Using temp file due to error: {e}")
+                    with open(temp_path, "rb") as src, open(uploads_path, "wb") as dst:
+                        dst.write(src.read())
+                    logging.info("Successfully copied file to uploads: %s", uploads_path)
+                    return uploads_path
+                except (PermissionError, OSError) as e:
+                    logging.warning("Could not copy to uploads directory: %s", e)
+                    logging.info("Using temp file as storage: %s", temp_path)
                     return temp_path
 
         except Exception as e:
-            logger.error(f"Error in save_file: {e}")
-            # Don't try to clean up temp file - it might be needed
+            logging.error("Error in save_file: %s", e)
             raise
 
-    def get_file_url(self, filename, expires_in=3600):
-        """Get a URL for accessing the file"""
+    def get_file_url(self, filename: str | None, expires_in: int = 3600) -> str | None:
+        """Return a URL for accessing the stored file.
+
+        Args:
+            filename: Name of the file to locate
+            expires_in: Presigned URL lifetime in seconds (S3 only, default: 3600)
+
+        Returns:
+            URL string if found, None if filename is empty
+
+        Raises:
+            ClientError: If generating a presigned S3 URL fails
+        """
         if not filename:
             return None
-            
-        if STORAGE_TYPE == 's3':
+
+        if STORAGE_TYPE == "s3":
             try:
                 url = self.s3.generate_presigned_url(
-                    'get_object',
-                    Params={
-                        'Bucket': S3_BUCKET,
-                        'Key': f"uploads/{filename}"
-                    },
+                    "get_object",
+                    Params={"Bucket": S3_BUCKET, "Key": f"uploads/{filename}"},
                     ExpiresIn=expires_in
                 )
                 return url
             except ClientError as e:
-                logger.error(f"Error generating presigned URL: {e}")
+                logging.error("Error generating presigned URL: %s", e)
                 raise
         else:
-            # For local development, check multiple possible locations
-            
-            # Check if file is in uploads directory
             uploads_path = os.path.join(UPLOADS_DIR, filename)
             if os.path.exists(uploads_path):
-                logger.info(f"File {filename} found in uploads directory, returning /uploads/ URL")
+                logging.info("File %s found in uploads directory", filename)
                 return f"/uploads/{filename}"
-            
-            # Check if file is in application temp directory
-            app_temp_path = os.path.join('temp', filename)
+
+            app_temp_path = os.path.join("temp", filename)
             if os.path.exists(app_temp_path):
-                logger.info(f"File {filename} found in application temp directory")
+                logging.info("File %s found in application temp directory", filename)
                 return f"/temp/{filename}"
-            
-            # Check if file is in system temp directory
+
             system_temp_path = os.path.join(tempfile.gettempdir(), filename)
             if os.path.exists(system_temp_path):
-                logger.info(f"File {filename} found in system temp directory")
-                # For system temp files, return a /temp/ URL that will be handled by serve_temp_file
+                logging.info("File %s found in system temp directory", filename)
                 return f"/temp/{filename}"
-            
-            logger.warning(f"File {filename} not found in any directory, defaulting to /uploads/ URL")
-            # Default to uploads path even if not found
+
+            logging.warning(
+                "File %s not found in any directory, defaulting to /uploads/ URL", filename
+            )
             return f"/uploads/{filename}"
 
-    def delete_file(self, filename):
-        """Delete a file from storage"""
-        if STORAGE_TYPE == 's3':
+    def delete_file(self, filename: str) -> None:
+        """Delete a file from storage.
+
+        Args:
+            filename: Name of the file to delete
+
+        Raises:
+            ClientError: If S3 deletion fails
+        """
+        if STORAGE_TYPE == "s3":
             try:
-                self.s3.delete_object(
-                    Bucket=S3_BUCKET,
-                    Key=f"uploads/{filename}"
-                )
+                self.s3.delete_object(Bucket=S3_BUCKET, Key=f"uploads/{filename}")
             except ClientError as e:
                 print(f"Error deleting from S3: {e}")
                 raise
         else:
-            filepath = os.path.join('uploads', filename)
+            filepath = os.path.join("uploads", filename)
             if os.path.exists(filepath):
                 os.remove(filepath)
 
-    def get_file_bytes(self, filename):
-        """
-        Get the file contents as bytes. Works with both local and remote storage.
-        
+    def get_file_bytes(self, filename: str) -> bytes | None:
+        """Return the file contents as bytes.
+
         Args:
-            filename: The name of the file to retrieve
-            
+            filename: Name of the file to retrieve
+
         Returns:
-            bytes: The file contents as bytes if found
-            None: If the file doesn't exist
+            File contents as bytes, or None if not found
         """
-        logger.info(f"Getting file bytes for: {filename}")
-        
-        if STORAGE_TYPE == 's3':
+        logging.info("Getting file bytes for: %s", filename)
+
+        if STORAGE_TYPE == "s3":
             try:
                 response = self.s3.get_object(
-                    Bucket=S3_BUCKET,
-                    Key=f"uploads/{filename}"
+                    Bucket=S3_BUCKET, Key=f"uploads/{filename}"
                 )
-                return response['Body'].read()
+                return response["Body"].read()
             except Exception as e:
-                logger.error(f"Error retrieving file {filename} from S3: {e}")
+                logging.error("Error retrieving file %s from S3: %s", filename, e)
                 return None
         else:
-            # For local storage, check different locations
             possible_paths = [
-                os.path.join(UPLOADS_DIR, filename),              # uploads directory
-                os.path.join(os.getcwd(), 'uploads', filename),   # direct uploads directory
-                os.path.join(os.getcwd(), 'temp', filename),      # app temp directory
-                os.path.join(tempfile.gettempdir(), filename)     # system temp directory
+                os.path.join(UPLOADS_DIR, filename),
+                os.path.join(os.getcwd(), "uploads", filename),
+                os.path.join(os.getcwd(), "temp", filename),
+                os.path.join(tempfile.gettempdir(), filename)
             ]
-            
+
             for path in possible_paths:
                 if os.path.exists(path):
-                    logger.info(f"Found file at: {path}")
+                    logging.info("Found file at: %s", path)
                     try:
-                        with open(path, 'rb') as f:
+                        with open(path, "rb") as f:
                             return f.read()
                     except Exception as e:
-                        logger.error(f"Error reading file {path}: {e}")
-                        # Try the next path
-            
-            logger.warning(f"File {filename} not found in any location")
+                        logging.error("Error reading file %s: %s", path, e)
+
+            logging.warning("File %s not found in any location", filename)
             return None
 
+
 # Global storage manager instance
-storage = StorageManager() 
+storage = StorageManager()

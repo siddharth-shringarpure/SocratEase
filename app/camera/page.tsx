@@ -181,6 +181,8 @@ export default function CameraPage() {
           const video = videoRef.current;
           const canvas = canvasRef.current;
 
+          if (!video || !canvas) return;
+
           const displayRect = video.getBoundingClientRect();
           const displayWidth = displayRect.width;
           const displayHeight = displayRect.height;

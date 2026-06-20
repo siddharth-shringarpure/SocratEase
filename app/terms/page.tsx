@@ -399,7 +399,7 @@ export default function TermsAndConditions(): JSX.Element {
                       scale: activeSection === section.id ? 1.2 : 1,
                       boxShadow:
                         activeSection === section.id
-                          ? "0 0 8px rgba(var(--primary), 0.5)"
+                          ? "0 0 8px rgba(17, 17, 27, 0.5)"
                           : "none",
                     }}
                   ></motion.div>

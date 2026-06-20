@@ -4,7 +4,6 @@ Templates and generators for speech feedback.
 This module provides templates and functions for generating personalised feedback
 on speech practice sessions, considering various speaking categories and metrics.
 """
-from typing import Dict, Optional, Any
 
 # Default response when analysis fails
 DEFAULT_FEEDBACK_TEXT = (
@@ -54,12 +53,11 @@ CATEGORY_FEEDBACK_TEMPLATES = {
 
 
 def generate_feedback_text(
-    analysis: Optional[Dict[str, Any]] = None,
-    practice_category: Optional[str] = None,
+    analysis: dict | None = None,
+    practice_category: str | None = None,
     default_text: str = DEFAULT_FEEDBACK_TEXT
 ) -> str:
-    """
-    Generate personalised feedback based on speech analysis and category.
+    """Generate personalised feedback based on speech analysis and category.
 
     Args:
         analysis: Dictionary containing speech analysis metrics
@@ -67,9 +65,8 @@ def generate_feedback_text(
         default_text: Fallback text when analysis is unavailable
 
     Returns:
-        A formatted feedback string with personalised recommendations
+        Formatted feedback string with personalised recommendations
     """
-    # Return category-specific default if no analysis but category exists
     if not analysis and practice_category in CATEGORY_FEEDBACK_TEMPLATES:
         return (
             f"Here's some feedback on your {practice_category} practice.\n\n"
@@ -79,11 +76,9 @@ def generate_feedback_text(
             f"Keep practising to enhance your {practice_category} skills!"
         )
 
-    # Return generic feedback if no analysis or category
     if not analysis:
         return default_text
 
-    # Generate filler word feedback based on percentage
     filler_percentage = analysis["filler_percentage"]
     if filler_percentage <= 3:
         filler_comment = (
@@ -111,7 +106,6 @@ def generate_feedback_text(
             "clarity and impact of your speech."
         )
 
-    # Assess vocabulary diversity
     ttr_level = analysis["ttr_analysis"]["diversity_level"]
     if ttr_level == "very high":
         diversity_comment = (
@@ -138,7 +132,6 @@ def generate_feedback_text(
             "Try to use a wider range of words to enhance your speech's impact."
         )
 
-    # Evaluate logical flow
     flow_score = analysis["logical_flow"]["score"]
     if flow_score >= 80:
         flow_comment = (
@@ -160,7 +153,6 @@ def generate_feedback_text(
     else:
         flow_comment = "Focus on organising your thoughts more logically when speaking."
 
-    # Generate category-specific advice
     category_specific_advice = ""
     if practice_category in CATEGORY_FEEDBACK_TEMPLATES:
         if practice_category == "persuasive":
@@ -266,7 +258,6 @@ def generate_feedback_text(
             "over time."
         )
 
-    # Construct final feedback
     feedback_text = (
         f"Here's a summary of your {practice_category or 'speech'} practice "
         f"analysis.\n\n{filler_comment} {diversity_comment} {flow_comment}\n\n"

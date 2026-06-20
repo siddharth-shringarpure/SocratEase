@@ -35,7 +35,7 @@ const CARD_ANIMATION = {
   animate: { opacity: 1, scale: 1 },
   hover: {
     scale: 1.02,
-    borderColor: "hsl(var(--primary) / 0.5)",
+    borderColor: "hsla(240, 5.9%, 10%, 0.5)",
     transition: { duration: 0.2 },
   },
   tap: { scale: 0.98 },

@@ -1,25 +1,52 @@
-import pickle
-import numpy as np
+"""
+Tonality prediction module.
+
+Loads pre-trained models to predict the tonality of input text using
+sentence embeddings and a classification model.
+"""
 import os
+import pickle
 
-model_path = os.path.join(os.path.dirname(__file__), 'model', 'tonality_model.pk')
-with open(model_path, 'rb') as f:
-    model = pickle.load(f)
-model_path = os.path.join(os.path.dirname(__file__), 'model', 'tonality_embedding.pk')
-with open(model_path, 'rb') as f:
-    modelEmbedding = pickle.load(f)
-model_path = os.path.join(os.path.dirname(__file__), 'model', 'tonality_LE.pk')
-with open(model_path, 'rb') as f:
-    LE = pickle.load(f)
-def getEmbeddings (text):
-    res = modelEmbedding.encode(text)
-    return res
-def tonality(text):
-    embedding = getEmbeddings(text)
+import numpy as np
+
+_model_dir = os.path.dirname(__file__)
+
+_model_path = os.path.join(_model_dir, "model", "tonality_model.pk")
+with open(_model_path, "rb") as _f:
+    _model = pickle.load(_f)
+
+_embedding_path = os.path.join(_model_dir, "model", "tonality_embedding.pk")
+with open(_embedding_path, "rb") as _f:
+    _model_embedding = pickle.load(_f)
+
+_le_path = os.path.join(_model_dir, "model", "tonality_LE.pk")
+with open(_le_path, "rb") as _f:
+    _le = pickle.load(_f)
+
+
+def _get_embeddings(text: str) -> np.ndarray:
+    """Encode text into a sentence embedding vector.
+
+    Args:
+        text: Input string to encode
+
+    Returns:
+        NumPy array of embedding values
+    """
+    return _model_embedding.encode(text)
+
+
+def tonality(text: str) -> str:
+    """Predict the tonality of the given text.
+
+    Args:
+        text: Input string to classify
+
+    Returns:
+        Predicted tonality label as a string
+    """
+    embedding = _get_embeddings(text)
     x = np.array(embedding).reshape(1, -1)
-    pred = model.predict(x)
-    pred = LE.inverse_transform(pred)
+    pred = _model.predict(x)
+    pred = _le.inverse_transform(pred)
     return pred[0]
-pred = tonality("Why is debugging code so annoying?")
-
-print(pred)
