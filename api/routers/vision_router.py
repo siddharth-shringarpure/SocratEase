@@ -1,5 +1,4 @@
-"""
-Routes for vision-related endpoints, including face detection and gaze tracking.
+"""Routes for vision-related endpoints, including face detection and gaze tracking.
 
 This module provides Flask routes for processing images and video streams to detect
 facial features, gaze direction, and emotions. It uses MediaPipe for face detection
@@ -9,7 +8,7 @@ import base64
 import io
 import logging
 import os
-import traceback
+from typing import Any
 
 import cv2
 import mediapipe as mp
@@ -22,7 +21,6 @@ from mediapipe.tasks.python import vision
 from PIL import Image
 
 vision_bp = Blueprint("vision", __name__)
-logger = logging.getLogger(__name__)
 
 emotion_detector = None
 try:
@@ -210,9 +208,8 @@ def gen_frames():
                     b"--frame\r\n"
                     b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
                 )
-            except Exception as e:
-                logging.error("Error processing frame: %s", e)
-                traceback.print_exc()
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                logging.error("Error processing frame: %s", e, exc_info=True)
                 ret, buffer = cv2.imencode(".jpg", frame)
                 frame = buffer.tobytes()
                 yield (
@@ -224,7 +221,7 @@ def gen_frames():
 
 
 @vision_bp.route("/api/detect-gaze", methods=["POST"])
-def detect_gaze() -> any:
+def detect_gaze() -> Any:
     """Detect gaze direction in an uploaded image.
 
     Expects:
@@ -304,13 +301,13 @@ def detect_gaze() -> any:
             "gaze_arrow": gaze_arrow
         })
 
-    except Exception as e:
-        traceback.print_exc()
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logging.error("Error in gaze detection endpoint: %s", e, exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
 
 @vision_bp.route("/api/detect-combined", methods=["POST"])
-def detect_combined() -> any:
+def detect_combined() -> Any:
     """Detect both gaze direction and emotions in an uploaded image.
 
     Expects:
@@ -454,6 +451,6 @@ def detect_combined() -> any:
 
         return jsonify(result)
 
-    except Exception as e:
-        traceback.print_exc()
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logging.error("Error in combined detection endpoint: %s", e, exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500

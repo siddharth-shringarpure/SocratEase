@@ -13,16 +13,15 @@ import mimetypes
 import os
 import subprocess
 import tempfile
-import traceback
 from io import BytesIO
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Blueprint, Response, jsonify, request, send_file
 
+# TODO: storage dependency — pending proper storage service extraction
 from api.storage import STORAGE_TYPE, UPLOADS_DIR, storage
 
 file_bp = Blueprint("file", __name__)
-logger = logging.getLogger(__name__)
 
 
 @file_bp.route("/uploads/<path:filename>", methods=["OPTIONS"])
@@ -263,9 +262,8 @@ def upload_recording() -> Response:
                                 "Failed to clean up temp file %s: %s", temp_file, e
                             )
 
-            except Exception as e:
-                logging.error("Audio extraction error: %s", e)
-                logging.error(traceback.format_exc())
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                logging.error("Audio extraction error: %s", e, exc_info=True)
                 has_audio = False
                 audio_filename = None
 
@@ -290,9 +288,8 @@ def upload_recording() -> Response:
             "audioUrl": audio_url
         })
 
-    except Exception as e:
-        logging.error("Recording upload error: %s", e)
-        logging.error(traceback.format_exc())
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logging.error("Recording upload error: %s", e, exc_info=True)
         return jsonify({"error": "Failed to upload recording"}), 500
 
 
@@ -330,9 +327,8 @@ def get_recording() -> Response:
             download_name=filename
         )
 
-    except Exception as e:
-        logging.error("Recording retrieval error: %s", e)
-        logging.error(traceback.format_exc())
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logging.error("Recording retrieval error: %s", e, exc_info=True)
         return jsonify({"error": "Failed to retrieve recording"}), 500
 
 

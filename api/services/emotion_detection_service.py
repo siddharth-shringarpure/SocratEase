@@ -1,12 +1,10 @@
-"""
-Emotion detection service using DeepFace.
+"""Emotion detection service using DeepFace.
 
-This module provides functionality for detecting emotions in images using the DeepFace
-library. It handles graceful fallback when DeepFace is not available and provides
-detailed emotion analysis.
+This module provides functionality for detecting emotions in images using the
+DeepFace library. It handles graceful fallback when DeepFace is not available
+and provides detailed emotion analysis.
 """
 import logging
-import traceback
 from typing import Any
 
 import numpy as np
@@ -15,7 +13,7 @@ try:
     from deepface import DeepFace
     DEEPFACE_AVAILABLE = True
 except ImportError:
-    logging.warning("DeepFace not available - emotion detection will be disabled")
+    logging.warning("DeepFace not available -- emotion detection will be disabled")
     DEEPFACE_AVAILABLE = False
 
 
@@ -56,10 +54,9 @@ def detect_emotions(image_array: np.ndarray) -> dict[str, Any]:
             "dominant_emotion": dominant_emotion
         }
 
-    except Exception as e:
-        logging.error("Error during emotion detection: %s", e)
-        traceback.print_exc()
-
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        # DeepFace raises heterogeneous errors depending on model/backend
+        logging.error("Error during emotion detection: %s", e, exc_info=True)
         return {
             "success": False,
             "error": str(e)

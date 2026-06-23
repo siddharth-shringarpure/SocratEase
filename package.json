@@ -4,7 +4,7 @@
   "private": true,
   "packageManager": "pnpm@11.5.0",
   "scripts": {
-    "flask-dev": "FLASK_DEBUG=1 uv run python scripts/download_backend_models.py && PYTHONPATH=. uv run python api/app.py",
+    "backend-dev": "FLASK_DEBUG=1 PYTHONPATH=. uv run python scripts/download_backend_models.py && PYTHONPATH=. uv run python api/app.py",
     "next-dev": "next dev",
     "dev": "next dev",
     "docker": "NEXT_PUBLIC_API_URL=http://localhost:5000 docker compose up",

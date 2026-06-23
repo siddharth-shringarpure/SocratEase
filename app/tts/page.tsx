@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * @fileoverview Developer testing page for TTS with Neuphonic.
+ * @fileoverview Developer testing page for TTS.
  */
 
 import { useState, useEffect, useRef } from "react";
@@ -195,10 +195,7 @@ export default function TTSPage(): JSX.Element {
 
   const getErrorHelpText = () => {
     switch (errorType) {
-      case "api_key_invalid":
-        return "The Neuphonic API key appears to be invalid or has expired. Please contact an administrator to update the API key.";
-      case "quota_exceeded":
-        return "The Neuphonic API usage quota has been exceeded. Please try again later or contact an administrator.";
+      case "server_error":
       case "server_error":
         return "The speech synthesis server encountered an error. This might be temporary; please try again with shorter text.";
       default:

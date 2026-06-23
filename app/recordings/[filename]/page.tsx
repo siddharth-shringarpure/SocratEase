@@ -1,25 +1,12 @@
 "use client";
 
 import { useEffect, useState, useRef, useMemo } from "react";
-import {
-  useParams,
-  useRouter,
-  useSearchParams,
-  notFound,
-} from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardFooter,
-} from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { RadialBarChart, RadialBar, PolarRadiusAxis, Label } from "recharts";
-import type { Props as LabelProps } from "recharts/types/component/Label";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Badge } from "@/components/ui/badge";
@@ -161,7 +148,7 @@ function SpeechFeedback({
         content: `You used ${analysis.total_words} total words, with ${
           analysis.ttr_analysis.unique_words
         } being unique. Your logical flow score is ${Math.round(
-          analysis.logical_flow.score * 100
+          analysis.logical_flow.score * 100,
         )}%.`,
         emoji: "📊",
       },
@@ -224,7 +211,7 @@ function SpeechFeedback({
     } catch (error) {
       console.error("Error playing audio:", error);
       setAudioError(
-        "Sorry, we couldn't play your speech feedback audio. Please contact the developers if this persists."
+        "Sorry, we couldn't play your speech feedback audio. Please contact the developers if this persists.",
       );
       setIsPlaying(false);
     }
@@ -242,19 +229,19 @@ function SpeechFeedback({
       analysis.ttr_analysis.diversity_level === "very high"
         ? 95
         : analysis.ttr_analysis.diversity_level === "high"
-        ? 85
-        : analysis.ttr_analysis.diversity_level === "average"
-        ? 70
-        : analysis.ttr_analysis.diversity_level === "low"
-        ? 50
-        : 30;
+          ? 85
+          : analysis.ttr_analysis.diversity_level === "average"
+            ? 70
+            : analysis.ttr_analysis.diversity_level === "low"
+              ? 50
+              : 30;
 
     // Logical flow is already a percentage
     const flowScore = analysis.logical_flow.score * 100; // Convert from 0-1 to 0-100
 
     // Weighted average
     return Math.round(
-      fillerScore * 0.4 + diversityScore * 0.3 + flowScore * 0.3
+      fillerScore * 0.4 + diversityScore * 0.3 + flowScore * 0.3,
     );
   };
 
@@ -321,12 +308,12 @@ function SpeechFeedback({
                 {overallScore >= 90
                   ? "Excellent!"
                   : overallScore >= 80
-                  ? "Great job!"
-                  : overallScore >= 70
-                  ? "Good work!"
-                  : overallScore >= 60
-                  ? "Room for improvement"
-                  : "Keep practicing"}
+                    ? "Great job!"
+                    : overallScore >= 70
+                      ? "Good work!"
+                      : overallScore >= 60
+                        ? "Room for improvement"
+                        : "Keep practicing"}
               </p>
             </div>
           </div>
@@ -394,8 +381,8 @@ function SpeechFeedback({
             audioUrl?.startsWith("blob:")
               ? audioUrl
               : audioUrl
-              ? getAudioSource(audioUrl)
-              : undefined
+                ? getAudioSource(audioUrl)
+                : undefined
           }
           onEnded={() => setIsPlaying(false)}
           onLoadedData={() => setAudioLoaded(true)}
@@ -403,7 +390,7 @@ function SpeechFeedback({
             console.error("Audio error:", e);
             setIsPlaying(false);
             setAudioError(
-              "Sorry, we couldn't play your speech feedback audio. Please contact the developers if this persists."
+              "Sorry, we couldn't play your speech feedback audio. Please contact the developers if this persists.",
             );
             // Notify parent component of the error
             if (onAudioError) onAudioError();
@@ -486,7 +473,7 @@ export default function RecordingPage() {
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isGettingFeedback, setIsGettingFeedback] = useState(false);
   const [feedbackAudio, setFeedbackAudio] = useState<string | undefined>(
-    undefined
+    undefined,
   );
   // Add a state to handle not found cases on the client side
   const [isNotFound, setIsNotFound] = useState(false);
@@ -554,7 +541,7 @@ export default function RecordingPage() {
     // 1) Check if filename matches the expected format: deviceIdHash_YYYYMMDDTHHMMSS
     const isValidFormat = /^[a-zA-Z0-9]+_\d{8}T\d{6}$/.test(filename);
     console.log(
-      `Validation Effect: Filename format valid? ${isValidFormat} for ${filename}`
+      `Validation Effect: Filename format valid? ${isValidFormat} for ${filename}`,
     );
 
     if (!isValidFormat) {
@@ -650,7 +637,7 @@ export default function RecordingPage() {
   // Function to get data from localStorage with fallback to old format
   const getLocalStorageItem = (
     key: string,
-    fallbackKey: string
+    fallbackKey: string,
   ): string | null => {
     // Try new format first
     let data = localStorage.getItem(key);
@@ -662,7 +649,7 @@ export default function RecordingPage() {
       // If data found in old format, migrate it to new format
       if (data) {
         console.log(
-          `Migrating data from old format: ${fallbackKey} to new format: ${key}`
+          `Migrating data from old format: ${fallbackKey} to new format: ${key}`,
         );
         localStorage.setItem(key, data);
       }
@@ -678,7 +665,7 @@ export default function RecordingPage() {
       console.log(
         "Skipping transcription - access not definitively valid (isValidAccess: ",
         isValidAccess,
-        ")"
+        ")",
       );
       return;
     }
@@ -686,7 +673,7 @@ export default function RecordingPage() {
     // Prevent multiple attempts entirely
     if (!audioFilename || isTranscribing || transcriptionAttempted.current) {
       console.log(
-        "Skipping transcription - already attempted or in progress or no audio filename"
+        "Skipping transcription - already attempted or in progress or no audio filename",
       );
       return;
     }
@@ -732,13 +719,13 @@ export default function RecordingPage() {
             });
 
             if (checkResult.ok) {
-              console.log(`✅ File found at: ${url}`);
+              console.log(`✓ File found at: ${url}`);
               fileExists = true;
               workingUrl = url;
               break;
             } else {
               console.log(
-                `❌ File not found at: ${url} (Status: ${checkResult.status})`
+                `✗ File not found at: ${url} (Status: ${checkResult.status})`,
               );
             }
           } catch (err) {
@@ -756,12 +743,12 @@ export default function RecordingPage() {
         // Extract the actual filename from the working URL
         const effectiveFilename = workingUrl.split("/").pop();
         console.log(
-          `Using effective filename for API request: ${effectiveFilename}`
+          `Using effective filename for API request: ${effectiveFilename}`,
         );
 
         // Continue with transcription since the audio file exists
         console.log(
-          `Sending transcription request with filename: ${effectiveFilename}`
+          `Sending transcription request with filename: ${effectiveFilename}`,
         );
         const response = await fetch(`/api/speech2text`, {
           method: "POST",
@@ -790,7 +777,7 @@ export default function RecordingPage() {
           if (response.status === 503 || response.status === 429) {
             if (retryCount < MAX_RETRIES) {
               console.log(
-                `Will retry transcription after ${retryCount * 2} seconds`
+                `Will retry transcription after ${retryCount * 2} seconds`,
               );
               setTimeout(() => {
                 if (mountedRef.current) {
@@ -829,7 +816,7 @@ export default function RecordingPage() {
           const oldAnalysisKey = `recording_analysis_${filename}.mp4`;
           const existingAnalysis = getLocalStorageItem(
             analysisKey,
-            oldAnalysisKey
+            oldAnalysisKey,
           );
 
           // Get the metadata to ensure we have the correct duration
@@ -842,7 +829,7 @@ export default function RecordingPage() {
           // Merge the analysis data
           const analysisObj = mergeAnalysisData(
             existingAnalysis,
-            result.analysis
+            result.analysis,
           );
           console.log("Setting merged analysis object:", analysisObj);
           setAnalysis(analysisObj);
@@ -862,7 +849,7 @@ export default function RecordingPage() {
           const oldRecordingAnalysisKey = `recording_analysis_${filename}.mp4`;
           const existingRecordingAnalysis = getLocalStorageItem(
             recordingAnalysisKey,
-            oldRecordingAnalysisKey
+            oldRecordingAnalysisKey,
           );
           const parsedRecordingAnalysis = existingRecordingAnalysis
             ? JSON.parse(existingRecordingAnalysis)
@@ -880,14 +867,14 @@ export default function RecordingPage() {
           localStorage.setItem(analysisKey, JSON.stringify(completeAnalysis));
           console.log(
             "Saved complete analysis to localStorage:",
-            completeAnalysis
+            completeAnalysis,
           );
 
           // Now that we have successfully transcribed and saved the data to localStorage,
           // clean up the server-side audio file to save space
           if (effectiveFilename) {
             console.log(
-              `Requesting cleanup for audio file: ${effectiveFilename}`
+              `Requesting cleanup for audio file: ${effectiveFilename}`,
             );
             // Use fetch API to request file cleanup
             fetch("/api/cleanup-audio", {
@@ -899,7 +886,7 @@ export default function RecordingPage() {
               .then((data) => {
                 if (data.success) {
                   console.log(
-                    `Successfully cleaned up audio file on server: ${effectiveFilename}`
+                    `Successfully cleaned up audio file on server: ${effectiveFilename}`,
                   );
 
                   // Delete video file if not already cleaned up
@@ -909,7 +896,7 @@ export default function RecordingPage() {
                   console.warn(
                     `Failed to clean up audio file: ${
                       data.error || "Unknown error"
-                    }`
+                    }`,
                   );
                 }
               })
@@ -953,7 +940,7 @@ export default function RecordingPage() {
         setError(
           error instanceof Error
             ? `Transcription failed: ${error.message}`
-            : "Error transcribing audio. Please try again."
+            : "Error transcribing audio. Please try again.",
         );
       }
     } finally {
@@ -983,7 +970,7 @@ export default function RecordingPage() {
       // Skip data initialisation if access is not valid or not yet determined
       if (isValidAccess !== true) {
         console.log(
-          `Skipping data initialisation - access not definitively valid (isValidAccess: ${isValidAccess})`
+          `Skipping data initialisation - access not definitively valid (isValidAccess: ${isValidAccess})`,
         );
         return;
       }
@@ -1002,7 +989,7 @@ export default function RecordingPage() {
       if (!hasCompleteData && audioFilename) {
         try {
           console.log(
-            `Checking if audio file exists: /uploads/${audioFilename}.wav`
+            `Checking if audio file exists: /uploads/${audioFilename}.wav`,
           );
           const audioFileCheck = await fetch(`/uploads/${audioFilename}.wav`, {
             method: "HEAD",
@@ -1010,7 +997,7 @@ export default function RecordingPage() {
 
           if (!audioFileCheck.ok) {
             console.error(
-              `Audio file not found: /uploads/${audioFilename}.wav`
+              `Audio file not found: /uploads/${audioFilename}.wav`,
             );
             setIsNotFound(true);
             return;
@@ -1041,7 +1028,7 @@ export default function RecordingPage() {
           } else {
             // Set default empty recording analysis object for new videos
             console.log(
-              "No emotions/gaze data found, setting default recording analysis"
+              "No emotions/gaze data found, setting default recording analysis",
             );
             setRecordingAnalysis({
               emotions: [],
@@ -1053,7 +1040,7 @@ export default function RecordingPage() {
           // Set transcription and analysis if available
           if (data.text && data.total_words) {
             console.log(
-              "Found complete transcription data in localStorage, skipping API request"
+              "Found complete transcription data in localStorage, skipping API request",
             );
             setTranscription(data.text);
             const analysisObj = {
@@ -1087,7 +1074,7 @@ export default function RecordingPage() {
       // If we get here, we didn't find complete data in localStorage
       if (audioFilename && !transcriptionAttempted.current) {
         console.log(
-          "No complete data in localStorage, requesting transcription"
+          "No complete data in localStorage, requesting transcription",
         );
         getTranscription(controller.signal);
       }
@@ -1101,7 +1088,7 @@ export default function RecordingPage() {
       // Skip audio feedback check if access is not valid or undetermined
       if (isValidAccess !== true) {
         console.log(
-          `Skipping cached audio feedback check - access not definitively valid (isValidAccess: ${isValidAccess})`
+          `Skipping cached audio feedback check - access not definitively valid (isValidAccess: ${isValidAccess})`,
         );
         return;
       }
@@ -1181,7 +1168,7 @@ export default function RecordingPage() {
 
     // so if we get here, we need to generate new audio feedback
     console.log(
-      "Transcription is available, automatically generating audio feedback"
+      "Transcription is available, automatically generating audio feedback",
     );
 
     const autoGenerateFeedback = async () => {
@@ -1189,7 +1176,7 @@ export default function RecordingPage() {
       if (error || ttsServiceFailed) {
         console.log(
           "Skipping audio feedback generation due to previous error:",
-          error || "TTS service failure"
+          error || "TTS service failure",
         );
         return;
       }
@@ -1234,7 +1221,7 @@ export default function RecordingPage() {
           emotions: { [key: string]: number };
         }>
       | null
-      | undefined
+      | undefined,
   ) => {
     if (!emotionsData || !Array.isArray(emotionsData)) {
       console.warn("No emotions data available");
@@ -1256,7 +1243,7 @@ export default function RecordingPage() {
       ([emotion, sum]) => ({
         emotion,
         average: sum / emotionCounts[emotion],
-      })
+      }),
     );
 
     return averageEmotions
@@ -1269,7 +1256,7 @@ export default function RecordingPage() {
   };
 
   const getDominantGazeDirection = (
-    gazeData: Array<{ timestamp: number; direction: string }>
+    gazeData: Array<{ timestamp: number; direction: string }>,
   ) => {
     const directionCounts: { [key: string]: number } = {};
 
@@ -1291,7 +1278,7 @@ export default function RecordingPage() {
 
   const mergeAnalysisData = (
     localStorageData: string | null,
-    apiData: Partial<AnalysisData> | null
+    apiData: Partial<AnalysisData> | null,
   ): AnalysisData => {
     const defaultAnalysis: AnalysisData = {
       total_words: 0,
@@ -1375,14 +1362,14 @@ export default function RecordingPage() {
       console.log(
         "Skipping audio feedback generation - access not definitively valid (isValidAccess: ",
         isValidAccess,
-        ")"
+        ")",
       );
       return;
     }
 
     if (!audioFilename || !transcription || feedbackAudio) {
       console.log(
-        "Skipping audio feedback - conditions not met or already received"
+        "Skipping audio feedback - conditions not met or already received",
       );
       return;
     }
@@ -1402,7 +1389,7 @@ export default function RecordingPage() {
       console.log("Step 1: Checking for cached audio data in localStorage");
       const cachedAudioData = getLocalStorageItem(
         cachedAudioKey,
-        oldCachedAudioKey
+        oldCachedAudioKey,
       );
 
       if (cachedAudioData) {
@@ -1427,7 +1414,7 @@ export default function RecordingPage() {
         } catch (e) {
           console.warn(
             "Error using cached audio data, will try next option:",
-            e
+            e,
           );
           // Don't remove the cached data yet - it might just be a decoding issue
         }
@@ -1447,7 +1434,7 @@ export default function RecordingPage() {
           category = parsedData.category;
           console.log(
             "Found cached feedback text:",
-            feedbackText ? "Yes" : "No"
+            feedbackText ? "Yes" : "No",
           );
         } catch (e) {
           console.warn("Error parsing analysis data for feedback text:", e);
@@ -1470,7 +1457,7 @@ export default function RecordingPage() {
 
         if (!response.ok) {
           throw new Error(
-            `Failed to generate TTS from cached text: ${response.statusText}`
+            `Failed to generate TTS from cached text: ${response.statusText}`,
           );
         }
 
@@ -1491,12 +1478,12 @@ export default function RecordingPage() {
               stripBase64Prefix: true, // Strip the data URL prefix
               maxSizeMB: 4, // 4MB max size
             },
-            manageLocalStorageSpace
+            manageLocalStorageSpace,
           );
 
           if (cachingResult) {
             console.log(
-              "Successfully cached new audio feedback in localStorage"
+              "Successfully cached new audio feedback in localStorage",
             );
           } else {
             console.warn("Failed to cache new audio feedback in localStorage");
@@ -1527,7 +1514,7 @@ export default function RecordingPage() {
 
       if (!audioFileExists) {
         console.log(
-          `Audio file not found at ${recordingPath}, checking for analysis data`
+          `Audio file not found at ${recordingPath}, checking for analysis data`,
         );
 
         // Check if we have analysis data with transcription but just no audio file
@@ -1541,7 +1528,7 @@ export default function RecordingPage() {
             // If we have text in the analysis, we can generate audio from it
             if (parsedData.text) {
               console.log(
-                "Found transcription text in analysis data, generating audio from it"
+                "Found transcription text in analysis data, generating audio from it",
               );
 
               // Generate descriptive feedback from the analysis data
@@ -1566,7 +1553,7 @@ export default function RecordingPage() {
                 parsedData.logical_flow.score !== undefined
               ) {
                 const flowScore = Math.round(
-                  parsedData.logical_flow.score * 100
+                  parsedData.logical_flow.score * 100,
                 );
                 feedbackText += `Your logical flow score is ${flowScore}%. `;
               }
@@ -1596,7 +1583,7 @@ export default function RecordingPage() {
 
               if (!ttsResponse.ok) {
                 throw new Error(
-                  `Failed to generate audio from analysis: ${ttsResponse.statusText}`
+                  `Failed to generate audio from analysis: ${ttsResponse.statusText}`,
                 );
               }
 
@@ -1617,12 +1604,12 @@ export default function RecordingPage() {
                     stripBase64Prefix: true,
                     maxSizeMB: 4,
                   },
-                  manageLocalStorageSpace
+                  manageLocalStorageSpace,
                 );
 
                 if (cachingResult) {
                   console.log(
-                    "Successfully cached generated audio in localStorage"
+                    "Successfully cached generated audio in localStorage",
                   );
                 }
               } catch (e) {
@@ -1650,7 +1637,7 @@ export default function RecordingPage() {
       const audioResponse = await fetch(recordingPath);
       if (!audioResponse.ok) {
         throw new Error(
-          `Failed to fetch audio file: ${audioResponse.statusText}`
+          `Failed to fetch audio file: ${audioResponse.statusText}`,
         );
       }
 
@@ -1666,11 +1653,11 @@ export default function RecordingPage() {
           const parsedMetadata = JSON.parse(metadata);
           if (parsedMetadata.category) {
             categoryParam = `?category=${encodeURIComponent(
-              parsedMetadata.category
+              parsedMetadata.category,
             )}`;
             console.log(
               "Using category from metadata:",
-              parsedMetadata.category
+              parsedMetadata.category,
             );
           }
         }
@@ -1708,12 +1695,12 @@ export default function RecordingPage() {
               "TTS service error: " +
                 (errorData.detailed_error ||
                   errorData.error ||
-                  `Server returned ${response.status}`)
+                  `Server returned ${response.status}`),
             );
             return;
           } else {
             setServiceError(
-              `Could not generate audio feedback (${response.status})`
+              `Could not generate audio feedback (${response.status})`,
             );
             return;
           }
@@ -1725,7 +1712,7 @@ export default function RecordingPage() {
           if (errorData.error) {
             console.error(
               "Audio feedback returned error with 200 status:",
-              errorData
+              errorData,
             );
             throw new Error(errorData.error);
           }
@@ -1733,7 +1720,7 @@ export default function RecordingPage() {
 
         // Check if response includes category in headers
         const responsePracticeCategory = response.headers.get(
-          "X-Practice-Category"
+          "X-Practice-Category",
         );
         console.log("Response practice category:", responsePracticeCategory);
 
@@ -1764,10 +1751,10 @@ export default function RecordingPage() {
                   feedbackTextResponse.feedback_text;
                 localStorage.setItem(
                   analysisKey,
-                  JSON.stringify(parsedAnalysis)
+                  JSON.stringify(parsedAnalysis),
                 );
                 console.log(
-                  "Saved feedback text to analysis data for future use"
+                  "Saved feedback text to analysis data for future use",
                 );
               }
             }
@@ -1792,7 +1779,7 @@ export default function RecordingPage() {
               localStorage.setItem(metadataKey, JSON.stringify(parsedMetadata));
               console.log(
                 "Updated metadata with server category:",
-                responsePracticeCategory
+                responsePracticeCategory,
               );
             }
 
@@ -1801,7 +1788,7 @@ export default function RecordingPage() {
             const oldAnalysisKey = `recording_analysis_${filename}.mp4`;
             const analysisData = getLocalStorageItem(
               analysisKey,
-              oldAnalysisKey
+              oldAnalysisKey,
             );
             if (analysisData) {
               const parsedData = JSON.parse(analysisData);
@@ -1809,13 +1796,13 @@ export default function RecordingPage() {
               localStorage.setItem(analysisKey, JSON.stringify(parsedData));
               console.log(
                 "Updated analysis data with server category:",
-                responsePracticeCategory
+                responsePracticeCategory,
               );
             }
           } catch (e) {
             console.warn(
               "Error updating practice category in localStorage:",
-              e
+              e,
             );
           }
         }
@@ -1852,17 +1839,17 @@ export default function RecordingPage() {
               try {
                 localStorage.setItem(cachedAudioKey, base64Audio);
                 console.log(
-                  "Saved audio feedback data to localStorage for future use"
+                  "Saved audio feedback data to localStorage for future use",
                 );
               } catch (storageError) {
                 console.warn(
-                  "localStorage quota exceeded, attempting to clear older audio data"
+                  "localStorage quota exceeded, attempting to clear older audio data",
                 );
 
                 // Try to make room by removing older audio data
                 const madeRoom = manageLocalStorageSpace(
                   estimatedSize,
-                  cachedAudioKey
+                  cachedAudioKey,
                 );
 
                 if (madeRoom) {
@@ -1870,18 +1857,18 @@ export default function RecordingPage() {
                   try {
                     localStorage.setItem(cachedAudioKey, base64Audio);
                     console.log(
-                      "Successfully saved audio after clearing older data"
+                      "Successfully saved audio after clearing older data",
                     );
                   } catch (retryError) {
                     console.warn(
                       "Still unable to save audio data after clearing space:",
-                      retryError
+                      retryError,
                     );
                     // Silently fail - the app will regenerate audio next time
                   }
                 } else {
                   console.warn(
-                    "Could not free enough space for new audio data"
+                    "Could not free enough space for new audio data",
                   );
                 }
               }
@@ -1891,7 +1878,7 @@ export default function RecordingPage() {
                   estimatedSize /
                   1024 /
                   1024
-                ).toFixed(2)}MB)`
+                ).toFixed(2)}MB)`,
               );
             }
 
@@ -1995,7 +1982,7 @@ export default function RecordingPage() {
   // Add this new function to manage localStorage space
   const manageLocalStorageSpace = (
     requiredBytes: number,
-    currentKey: string
+    currentKey: string,
   ): boolean => {
     try {
       console.log(
@@ -2003,7 +1990,7 @@ export default function RecordingPage() {
           requiredBytes /
           1024 /
           1024
-        ).toFixed(2)}MB of localStorage space`
+        ).toFixed(2)}MB of localStorage space`,
       );
 
       // Estimate current usage (better than using a fixed value)
@@ -2028,8 +2015,8 @@ export default function RecordingPage() {
 
       console.log(
         `Estimated current usage: ${(initialUsage / 1024 / 1024).toFixed(
-          2
-        )}MB, Available: ${(estimatedAvailable / 1024 / 1024).toFixed(2)}MB`
+          2,
+        )}MB, Available: ${(estimatedAvailable / 1024 / 1024).toFixed(2)}MB`,
       );
 
       // If we already have enough space, no need to clear anything
@@ -2046,12 +2033,12 @@ export default function RecordingPage() {
 
       // Filter only audio feedback keys
       const audioFeedbackKeys = allKeys.filter((key) =>
-        key.startsWith("audio_feedback_data_")
+        key.startsWith("audio_feedback_data_"),
       );
 
       // Skip the current key we're trying to save
       const otherAudioKeys = audioFeedbackKeys.filter(
-        (key) => key !== currentKey
+        (key) => key !== currentKey,
       );
 
       if (otherAudioKeys.length > 0) {
@@ -2072,7 +2059,7 @@ export default function RecordingPage() {
               const second = dateMatch[2].substring(4, 6);
 
               const date = new Date(
-                `${year}-${month}-${day}T${hour}:${minute}:${second}`
+                `${year}-${month}-${day}T${hour}:${minute}:${second}`,
               );
               timestamp = date.getTime();
             } catch (e) {
@@ -2126,7 +2113,7 @@ export default function RecordingPage() {
                 freedSpace /
                 1024 /
                 1024
-              ).toFixed(2)}MB)`
+              ).toFixed(2)}MB)`,
             );
 
             // Check if we've cleared enough space with a safety margin
@@ -2136,7 +2123,7 @@ export default function RecordingPage() {
                   freedSpace /
                   1024 /
                   1024
-                ).toFixed(2)}MB`
+                ).toFixed(2)}MB`,
               );
               return true;
             }
@@ -2146,8 +2133,8 @@ export default function RecordingPage() {
         // If we removed some items but not enough space yet
         console.log(
           `Freed ${(freedSpace / 1024 / 1024).toFixed(
-            2
-          )}MB from ${removedCount} audio items, but need more space`
+            2,
+          )}MB from ${removedCount} audio items, but need more space`,
         );
       } else {
         console.log("No audio feedback data to clear");
@@ -2208,7 +2195,7 @@ export default function RecordingPage() {
                 itemSize /
                 1024 /
                 1024
-              ).toFixed(2)}MB, priority: ${item.priority})`
+              ).toFixed(2)}MB, priority: ${item.priority})`,
             );
 
             // Check if we've cleared enough total space
@@ -2221,7 +2208,7 @@ export default function RecordingPage() {
                   newAvailable /
                   1024 /
                   1024
-                ).toFixed(2)}MB available`
+                ).toFixed(2)}MB available`,
               );
               return true;
             }
@@ -2230,8 +2217,8 @@ export default function RecordingPage() {
 
         console.log(
           `Freed additional ${(additionalFreedSpace / 1024 / 1024).toFixed(
-            2
-          )}MB from ${additionalRemoved} other items`
+            2,
+          )}MB from ${additionalRemoved} other items`,
         );
 
         // If we removed anything at all, consider it a partial success
@@ -2246,7 +2233,7 @@ export default function RecordingPage() {
       // ------------------------------------------------------------
       if (currentKey.startsWith("audio_feedback_data_")) {
         console.log(
-          "Last resort: clearing almost everything to make room for audio feedback"
+          "Last resort: clearing almost everything to make room for audio feedback",
         );
 
         // Keep only the current key and any critical data items
@@ -2254,11 +2241,11 @@ export default function RecordingPage() {
           (key) =>
             key === currentKey ||
             key.includes("user_preferences") ||
-            key.includes("auth")
+            key.includes("auth"),
         );
 
         const keysToRemove = allKeys.filter(
-          (key) => !criticalKeys.includes(key)
+          (key) => !criticalKeys.includes(key),
         );
 
         if (keysToRemove.length > 0) {
@@ -2280,7 +2267,7 @@ export default function RecordingPage() {
               lastResortFreed /
               1024 /
               1024
-            ).toFixed(2)}MB`
+            ).toFixed(2)}MB`,
           );
           return true;
         }
@@ -2288,7 +2275,7 @@ export default function RecordingPage() {
 
       // If we get here, we tried everything but couldn't free enough space
       console.log(
-        "Could not free enough localStorage space despite all attempts"
+        "Could not free enough localStorage space despite all attempts",
       );
       return false;
     } catch (e) {
@@ -2380,7 +2367,7 @@ export default function RecordingPage() {
                         refreshKey,
                       },
                       null,
-                      2
+                      2,
                     )}
                   </pre>
                 </div>
@@ -2408,8 +2395,7 @@ export default function RecordingPage() {
                         your speech analysis.
                       </p>
                       <p className="text-sm text-muted-foreground">
-                        Video files may be automatically removed after
-                        processing to save space.
+                        Video files are discarded once processed.
                       </p>
                     </div>
                   </CardContent>
@@ -2571,12 +2557,14 @@ export default function RecordingPage() {
                                     (analysis?.filler_percentage || 0) >= 18
                                       ? "rgb(239 68 68)" // red-500 (bad)
                                       : (analysis?.filler_percentage || 0) >= 12
-                                      ? "rgb(249 115 22)" // orange-500
-                                      : (analysis?.filler_percentage || 0) >= 7
-                                      ? "rgb(234 179 8)" // yellow-500
-                                      : (analysis?.filler_percentage || 0) >= 3
-                                      ? "rgb(132 204 22)" // lime-500
-                                      : "rgb(34 197 94)" // green-500 (good)
+                                        ? "rgb(249 115 22)" // orange-500
+                                        : (analysis?.filler_percentage || 0) >=
+                                            7
+                                          ? "rgb(234 179 8)" // yellow-500
+                                          : (analysis?.filler_percentage ||
+                                                0) >= 3
+                                            ? "rgb(132 204 22)" // lime-500
+                                            : "rgb(34 197 94)" // green-500 (good)
                                   }
                                 />
                               </RadialBarChart>
@@ -2595,12 +2583,12 @@ export default function RecordingPage() {
                                   {analysis.filler_percentage >= 18
                                     ? "Whoa! You're using quite a few filler words — let's work on that!"
                                     : analysis.filler_percentage >= 12
-                                    ? "Not bad, but you could cut back on some of those filler words"
-                                    : analysis.filler_percentage >= 7
-                                    ? "You're right in the middle — keep practicing!"
-                                    : analysis.filler_percentage >= 3
-                                    ? "Nice job keeping those filler words in check!"
-                                    : "Wow, you're crushing it! Barely any filler words!"}
+                                      ? "Not bad, but you could cut back on some of those filler words"
+                                      : analysis.filler_percentage >= 7
+                                        ? "You're right in the middle — keep practicing!"
+                                        : analysis.filler_percentage >= 3
+                                          ? "Nice job keeping those filler words in check!"
+                                          : "Wow, you're crushing it! Barely any filler words!"}
                                 </p>
                               </div>
                               <div className="space-y-2 pt-4">
@@ -2617,15 +2605,15 @@ export default function RecordingPage() {
                                   "very high"
                                     ? "Outstanding vocabulary range! You're using a rich and diverse set of words."
                                     : analysis.ttr_analysis.diversity_level ===
-                                      "high"
-                                    ? "Great word variety! Your vocabulary is quite diverse."
-                                    : analysis.ttr_analysis.diversity_level ===
-                                      "average"
-                                    ? "You're using a good mix of words. Keep expanding your vocabulary!"
-                                    : analysis.ttr_analysis.diversity_level ===
-                                      "low"
-                                    ? "Try incorporating more varied words to enhance your speech."
-                                    : "Consider broadening your vocabulary to make your speech more engaging."}
+                                        "high"
+                                      ? "Great word variety! Your vocabulary is quite diverse."
+                                      : analysis.ttr_analysis
+                                            .diversity_level === "average"
+                                        ? "You're using a good mix of words. Keep expanding your vocabulary!"
+                                        : analysis.ttr_analysis
+                                              .diversity_level === "low"
+                                          ? "Try incorporating more varied words to enhance your speech."
+                                          : "Consider broadening your vocabulary to make your speech more engaging."}
                                 </p>
                               </div>
                               <div className="space-y-2 pt-4">
@@ -2641,12 +2629,12 @@ export default function RecordingPage() {
                                   {analysis.logical_flow.score >= 80
                                     ? "Excellent logical flow! Your ideas connect seamlessly."
                                     : analysis.logical_flow.score >= 60
-                                    ? "Good logical progression. Your points flow well together."
-                                    : analysis.logical_flow.score >= 40
-                                    ? "Average flow. Try to strengthen the connections between ideas."
-                                    : analysis.logical_flow.score >= 20
-                                    ? "The logical flow needs work. Focus on transitioning between points."
-                                    : "Consider restructuring your speech for better logical progression."}
+                                      ? "Good logical progression. Your points flow well together."
+                                      : analysis.logical_flow.score >= 40
+                                        ? "Average flow. Try to strengthen the connections between ideas."
+                                        : analysis.logical_flow.score >= 20
+                                          ? "The logical flow needs work. Focus on transitioning between points."
+                                          : "Consider restructuring your speech for better logical progression."}
                                 </p>
                               </div>
                             </div>
@@ -2690,7 +2678,7 @@ export default function RecordingPage() {
                                       >
                                         {filler}
                                       </span>
-                                    )
+                                    ),
                                   )}
                                 </div>
                               </div>
@@ -2723,7 +2711,7 @@ export default function RecordingPage() {
                                           <div className="flex-1">
                                             <Progress
                                               value={parseFloat(
-                                                emotion.percentage
+                                                emotion.percentage,
                                               )}
                                               max={100}
                                               className="h-2"
@@ -2733,7 +2721,7 @@ export default function RecordingPage() {
                                             {emotion.percentage}%
                                           </div>
                                         </div>
-                                      )
+                                      ),
                                     )}
                                   </div>
                                 </div>
@@ -2762,7 +2750,7 @@ export default function RecordingPage() {
                                             )
                                           </div>
                                         </div>
-                                      )
+                                      ),
                                     )}
                                   </div>
                                 </div>
@@ -2829,14 +2817,14 @@ const cacheAudioAsBase64 = async (
     maxSizeMB?: number; // Maximum size in MB (default: 5MB)
     stripBase64Prefix?: boolean; // Whether to strip the "data:audio/..." prefix (default: false)
   },
-  storageManager?: (requiredBytes: number, currentKey: string) => boolean
+  storageManager?: (requiredBytes: number, currentKey: string) => boolean,
 ): Promise<boolean> => {
   const maxSizeMB = options?.maxSizeMB || 5;
   const stripPrefix = options?.stripBase64Prefix || false;
 
   try {
     console.log(
-      `Attempting to cache audio from ${audioUrl} to localStorage (key: ${audioKey})`
+      `Attempting to cache audio from ${audioUrl} to localStorage (key: ${audioKey})`,
     );
 
     // Check if we already have it cached
@@ -2850,7 +2838,7 @@ const cacheAudioAsBase64 = async (
     const response = await fetch(audioUrl);
     if (!response.ok) {
       console.error(
-        `Failed to fetch audio: ${response.status} ${response.statusText}`
+        `Failed to fetch audio: ${response.status} ${response.statusText}`,
       );
       return false;
     }
@@ -2863,8 +2851,8 @@ const cacheAudioAsBase64 = async (
     if (fileSizeInMB > maxSizeMB) {
       console.warn(
         `Audio file too large to cache (${fileSizeInMB.toFixed(
-          2
-        )}MB). Max size: ${maxSizeMB}MB`
+          2,
+        )}MB). Max size: ${maxSizeMB}MB`,
       );
       return false;
     }
@@ -2892,7 +2880,7 @@ const cacheAudioAsBase64 = async (
                 estimatedSize /
                 1024 /
                 1024
-              ).toFixed(2)}MB)`
+              ).toFixed(2)}MB)`,
             );
             resolve(false);
             return;
@@ -2903,13 +2891,13 @@ const cacheAudioAsBase64 = async (
             localStorage.setItem(audioKey, base64data);
             console.log(
               `Successfully cached audio (${(base64data.length / 1024).toFixed(
-                2
-              )}KB) in localStorage`
+                2,
+              )}KB) in localStorage`,
             );
             resolve(true);
           } catch (storageError) {
             console.warn(
-              "localStorage quota exceeded, attempting to clear older audio data"
+              "localStorage quota exceeded, attempting to clear older audio data",
             );
 
             // Try to make room by removing older audio data if we have a storage management function
@@ -2921,14 +2909,14 @@ const cacheAudioAsBase64 = async (
                 try {
                   localStorage.setItem(audioKey, base64data);
                   console.log(
-                    "Successfully saved audio after clearing older data"
+                    "Successfully saved audio after clearing older data",
                   );
                   resolve(true);
                   return;
                 } catch (retryError) {
                   console.warn(
                     "Still unable to save audio data after clearing space:",
-                    retryError
+                    retryError,
                   );
                 }
               } else {
@@ -2992,7 +2980,7 @@ const cleanupAudioFile = async (audioFilename: string) => {
     const result = await response.json();
     if (result.success) {
       console.log(
-        `Successfully cleaned up audio file on server: ${audioFilename}`
+        `Successfully cleaned up audio file on server: ${audioFilename}`,
       );
     } else {
       console.warn(`Failed to clean up audio file: ${result.error}`);
@@ -3019,7 +3007,7 @@ const cleanupVideoFile = async (videoFilename: string) => {
     const result = await response.json();
     if (result.success) {
       console.log(
-        `Successfully cleaned up video file on server: ${videoFilename}`
+        `Successfully cleaned up video file on server: ${videoFilename}`,
       );
     } else {
       console.warn(`Failed to clean up video file: ${result.error}`);

@@ -1,5 +1,4 @@
-"""
-Text analysis services for speech evaluation.
+"""Text analysis services for speech evaluation.
 
 This module provides functions for analysing speech text, including:
 - Filler word detection and analysis
@@ -10,14 +9,11 @@ import logging
 import os
 import pickle as pkl
 import re
-import traceback
-from itertools import tee
 from typing import Any
 
 import torch
 import transformers
 
-# Common filler words and phrases in English speech
 FILLER_WORDS: set[str] = {
     "um", "uh", "like", "you know", "well", "so", "actually", "basically",
     "i mean", "right", "okay", "er", "hmm", "literally", "anyway",
@@ -97,8 +93,9 @@ def analyse_filler_words(text: str) -> dict[str, Any]:
             logical_status = "needs_work"
         else:
             logical_status = "poor"
-    except Exception as e:
-        print(f"Error calculating logical flow: {e}")
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        # Logical flow model may fail due to version mismatches — use fallback
+        logging.error("Error calculating logical flow: %s", e)
         logical_score = 0.69
         logical_status = "unknown"
 
@@ -172,34 +169,38 @@ def logical_flow(text: str) -> float:
         model_path = os.path.join(
             os.path.dirname(__file__), "model", "logical_model.pk"
         )
-        print(f"Loading model from: {model_path}")
+        logging.info("Loading logical flow model from: %s", model_path)
 
         if not os.path.exists(model_path):
-            print(f"Model not found at: {model_path}")
+            logging.warning("Logical flow model not found at: %s", model_path)
             return 0.69
 
-        print(f"PyTorch version: {torch.__version__}")
-        print(f"Transformers version: {transformers.__version__}")
+        logging.debug(
+            "PyTorch %s, Transformers %s",
+            torch.__version__,
+            transformers.__version__,
+        )
 
         with open(model_path, "rb") as f:
             try:
                 logical_model = pkl.load(f)
-                print("Successfully loaded logical flow model")
+                logging.info("✓ Logical flow model loaded")
             except RuntimeError as e:
                 if "register_pytree_node()" in str(e):
-                    print("Version mismatch between PyTorch and transformers")
+                    logging.warning(
+                        "Version mismatch between PyTorch and transformers"
+                    )
                     return 0.0069
                 raise
 
-        print(f"Processing text of length: {len(text)}")
+        logging.info("Processing text of length: %d", len(text))
         pred: list[dict[str, float]] = logical_model.predict(text)
         score = pred[0]["score"]
-        print(f"Flow score: {score}")
+        logging.info("Flow score: %.4f", score)
 
         return score
 
-    except Exception as e:
-        print(f"Error in flow analysis: {e}")
-        print(f"Error type: {type(e).__name__}")
-        traceback.print_exc()
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        # Broad catch needed — model loading/inference can raise many error types
+        logging.error("Error in flow analysis: %s", e, exc_info=True)
         return 0.69

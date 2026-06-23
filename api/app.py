@@ -53,11 +53,11 @@ CORS(app, resources={r"/*": {
 }})
 
 # Register route blueprints
-from api.routes.feedback_routes import feedback_bp
-from api.routes.file_routes import file_bp
-from api.routes.misc_routes import misc_bp
-from api.routes.transcription_routes import transcription_bp
-from api.routes.vision_routes import vision_bp
+from api.routers.feedback_router import feedback_bp
+from api.routers.file_router import file_bp
+from api.routers.misc_router import misc_bp
+from api.routers.transcription_router import transcription_bp
+from api.routers.vision_router import vision_bp
 
 app.register_blueprint(misc_bp)
 app.register_blueprint(feedback_bp)

@@ -1,10 +1,8 @@
-"""
-Routes for transcription-related endpoints.
+"""Routes for transcription-related endpoints.
 
 This module provides Flask routes for handling audio transcription requests,
 including file upload, processing, analysis, and cleanup functionality.
 """
-import datetime
 import logging
 import os
 import tempfile
@@ -12,12 +10,11 @@ import tempfile
 from flask import Blueprint, jsonify, request
 from werkzeug.utils import secure_filename
 
-from api.services.text_analysis import analyse_filler_words, calculate_ttr, logical_flow
-from api.services.transcription import transcribe_audio
-from api.utils.file_utils import allowed_audio_file
+from api.services.text_analysis_service import analyse_filler_words, calculate_ttr, logical_flow
+from api.services.transcription_service import transcribe_audio
+from api.utils.audio_utils import allowed_audio_file
 
 transcription_bp = Blueprint("transcription", __name__)
-logger = logging.getLogger(__name__)
 
 
 @transcription_bp.route("/api/speech2text", methods=["POST"])
@@ -33,10 +30,7 @@ def transcribe_request() -> tuple[dict, int]:
     temp_path: str | None = None
 
     try:
-        logging.info(
-            "%s: === Starting transcription request ===",
-            datetime.datetime.now()
-        )
+        logging.info("Starting transcription request")
 
         if request.is_json:
             data = request.get_json()
@@ -75,14 +69,7 @@ def transcribe_request() -> tuple[dict, int]:
             if not file.filename:
                 return {"success": False, "error": "Empty filename"}, 400
 
-            logging.info(
-                "%s: Received file: %s", datetime.datetime.now(), file.filename
-            )
-            logging.info(
-                "%s: File content type: %s",
-                datetime.datetime.now(),
-                file.content_type
-            )
+            logging.info("Received file: %s (%s)", file.filename, file.content_type)
 
             if not allowed_audio_file(file.filename):
                 return {"success": False, "error": "Invalid file type"}, 400
@@ -92,9 +79,7 @@ def transcribe_request() -> tuple[dict, int]:
             temp_path = os.path.join(temp_dir, secure_filename(file.filename))
             file.save(temp_path)
 
-        logging.info(
-            "%s: Processing file at: %s", datetime.datetime.now(), temp_path
-        )
+        logging.info("Processing file at: %s", temp_path)
 
         try:
             transcription = transcribe_audio(temp_path)
@@ -106,7 +91,7 @@ def transcribe_request() -> tuple[dict, int]:
                     flow_result = logical_flow(transcription)
                     if flow_result > 0:
                         analysis["logical_flow"]["score"] = flow_result
-                except Exception as flow_error:
+                except Exception as flow_error:  # pylint: disable=broad-exception-caught
                     logging.warning(
                         "Using fallback logical flow score: %s", flow_error
                     )
@@ -122,14 +107,11 @@ def transcribe_request() -> tuple[dict, int]:
                     try:
                         audio_filename = os.path.basename(temp_path)
                         logging.info(
-                            "Cleaning up audio file after successful transcription: %s",
+                            "Cleaning up audio file after transcription: %s",
                             audio_filename
                         )
                         os.remove(temp_path)
-                        logging.info(
-                            "Successfully deleted audio file: %s", audio_filename
-                        )
-                    except Exception as cleanup_error:
+                    except OSError as cleanup_error:
                         logging.error(
                             "Error cleaning up audio file: %s", cleanup_error
                         )
@@ -148,10 +130,8 @@ def transcribe_request() -> tuple[dict, int]:
                     "error": "Failed to transcribe audio"
                 }), 500
 
-        except Exception as e:
-            logging.error(
-                "%s: Error processing audio: %s", datetime.datetime.now(), e
-            )
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logging.error("Error processing audio: %s", e, exc_info=True)
             return jsonify({
                 "success": False,
                 "error": f"Error processing audio: {e}"
@@ -161,7 +141,7 @@ def transcribe_request() -> tuple[dict, int]:
         if temp_path and "/temp/" in temp_path and os.path.exists(temp_path):
             try:
                 os.remove(temp_path)
-            except Exception as e:
+            except OSError as e:
                 logging.error("Temp file cleanup failed: %s", e)
 
 
@@ -209,8 +189,8 @@ def cleanup_audio_file() -> tuple[dict, int]:
                     logging.info("Deleting audio file: %s", path)
                     os.remove(path)
                     deleted = True
-                    logging.info("Successfully deleted audio file: %s", filename)
-                except Exception as e:
+                    logging.info("✓ Deleted audio file: %s", filename)
+                except OSError as e:
                     return {
                         "success": False,
                         "error": f"Audio file deletion failed: {e}"
@@ -224,7 +204,7 @@ def cleanup_audio_file() -> tuple[dict, int]:
 
         return {"success": False, "error": "Audio file not found"}, 404
 
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-exception-caught
         return {
             "success": False,
             "error": "Error cleaning up audio file: " + str(e)
@@ -267,8 +247,8 @@ def cleanup_video_file() -> tuple[dict, int]:
                     logging.info("Deleting video file: %s", path)
                     os.remove(path)
                     deleted = True
-                    logging.info("Successfully deleted video file: %s", filename)
-                except Exception as e:
+                    logging.info("✓ Deleted video file: %s", filename)
+                except OSError as e:
                     return {
                         "success": False,
                         "error": f"Deletion failed: {e}"
@@ -282,7 +262,7 @@ def cleanup_video_file() -> tuple[dict, int]:
 
         return {"success": False, "error": "File not found"}, 404
 
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-exception-caught
         return {
             "success": False,
             "error": "Error cleaning up video file: " + str(e)

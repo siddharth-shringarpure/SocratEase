@@ -604,10 +604,10 @@ export default function PrivacyPolicy(): JSX.Element {
                                   Third-party services
                                 </h4>
                                 <p>
-                                  We connect with Neuphonic API to enhance your
-                                  experience, but we only send generated
-                                  feedback text (never any PII). Speech
-                                  processing happens locally on our backend.
+                                  Speech synthesis runs locally on our backend
+                                  using an on-device model. We never send your
+                                  audio or personal data to third-party TTS
+                                  services.
                                 </p>
                                 <p className="mt-2">
                                   Our app is hosted on Vercel and Render, which

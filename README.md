@@ -46,7 +46,7 @@ This approach, detailed in [D'Mello 2015](https://dl.acm.org/doi/pdf/10.1145/268
 - **AI/ML Processing**:
   - Computer Vision: MediaPipe, OpenCV, FER (Facial Emotion Recognition)
   - NLP: NLTK, HuggingFace Transformers, PyTorch
-  - Audio Processing: Librosa, Pydub, Neuphonic
+  - Audio Processing: Librosa, Pydub, supertonic-3 (local TTS)
 - **Deployment**: Docker, Docker Compose
 - **Data Storage**: File system (for recordings and processed results)
 
@@ -110,7 +110,6 @@ As we continue enhancing our analysis system, we plan to introduce new intellige
    cp .env.example .env
 
    # Edit with your configuration settings
-   # - Neuphonic API Key
    # - Backend URL
    ```
 

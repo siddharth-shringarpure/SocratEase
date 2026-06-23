@@ -11,8 +11,8 @@ const nextDev = spawn("npm", ["run", "next-dev"], {
   shell: true,
 });
 
-// Start Flask dev server
-const flaskDev = spawn("npm", ["run", "flask-dev"], {
+// Start backend dev server
+const flaskDev = spawn("npm", ["run", "backend-dev"], {
   stdio: "inherit",
   shell: true,
   env: {

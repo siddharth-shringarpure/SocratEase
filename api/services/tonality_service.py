@@ -1,5 +1,4 @@
-"""
-Tonality prediction module.
+"""Tonality prediction service.
 
 Loads pre-trained models to predict the tonality of input text using
 sentence embeddings and a classification model.
@@ -9,17 +8,18 @@ import pickle
 
 import numpy as np
 
-_model_dir = os.path.dirname(__file__)
+# api/models/ — one level up from services/
+_model_dir = os.path.join(os.path.dirname(__file__), "..", "models")
 
-_model_path = os.path.join(_model_dir, "model", "tonality_model.pk")
+_model_path = os.path.join(_model_dir, "tonality_model.pk")
 with open(_model_path, "rb") as _f:
     _model = pickle.load(_f)
 
-_embedding_path = os.path.join(_model_dir, "model", "tonality_embedding.pk")
+_embedding_path = os.path.join(_model_dir, "tonality_embedding.pk")
 with open(_embedding_path, "rb") as _f:
     _model_embedding = pickle.load(_f)
 
-_le_path = os.path.join(_model_dir, "model", "tonality_LE.pk")
+_le_path = os.path.join(_model_dir, "tonality_LE.pk")
 with open(_le_path, "rb") as _f:
     _le = pickle.load(_f)
 
