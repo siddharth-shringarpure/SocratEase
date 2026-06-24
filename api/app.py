@@ -1,70 +1,60 @@
-"""
-Flask application entry point for the speech analysis API.
-
-This module initialises the Flask application, configures logging and CORS,
-loads environment variables, and sets up the Whisper model for speech recognition.
-"""
+"""FastAPI application entry point for the speech analysis API."""
 import logging
-import os
 import sys
+from contextlib import asynccontextmanager
+from pathlib import Path
 
 import torch
 import whisper
 from dotenv import load_dotenv
-from flask import Flask
-from flask_cors import CORS
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-# Load environment configuration
+from api.routers.feedback_router import feedback_router
+from api.routers.file_router import file_router
+from api.routers.misc_router import misc_router
+from api.routers.transcription_router import transcription_router
+from api.routers.vision_router import vision_router
+
 load_dotenv()
 
-# Configure application logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler(sys.stderr)]
+    handlers=[logging.StreamHandler(sys.stderr)],
 )
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
-# Initialise Whisper model before creating Flask app
-try:
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    logging.info("Initialising Whisper model on device: %s", device)
-    model = whisper.load_model("small").to(device)
-    logging.info("Whisper model loaded successfully on %s", device)
-except Exception as e:
-    logging.error("Failed to load Whisper model: %s", e, exc_info=True)
-    model = None
 
-# Initialise Flask app
-app = Flask(__name__)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialise and tear down application resources."""
+    Path("temp").mkdir(exist_ok=True)
+    Path("uploads").mkdir(exist_ok=True)
 
-# Set up required storage directories
-os.makedirs("temp", exist_ok=True)
-os.makedirs("uploads", exist_ok=True)
+    try:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        logging.info("Initialising Whisper model on device: %s", device)
+        whisper.load_model("small").to(device)
+        logging.info("✓ Whisper model loaded on %s", device)
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logging.error("Failed to load Whisper model: %s", e, exc_info=True)
 
-# Configure cross-origin resource sharing
-CORS(app, resources={r"/*": {
-    "origins": ["*"],  # TODO: Restrict to specific domains in production
-    "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    "allow_headers": ["*"],
-    "supports_credentials": True,
-    "expose_headers": ["*"]
-}})
+    yield
 
-# Register route blueprints
-from api.routers.feedback_router import feedback_bp
-from api.routers.file_router import file_bp
-from api.routers.misc_router import misc_bp
-from api.routers.transcription_router import transcription_bp
-from api.routers.vision_router import vision_bp
 
-app.register_blueprint(misc_bp)
-app.register_blueprint(feedback_bp)
-app.register_blueprint(file_bp)
-app.register_blueprint(transcription_bp)
-app.register_blueprint(vision_bp)
+app = FastAPI(title="SocratEase API", lifespan=lifespan)
 
-if __name__ == "__main__":
-    port = int(os.environ.get("FLASK_RUN_PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=True)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # TODO: restrict to specific domains in production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
+
+app.include_router(misc_router)
+app.include_router(feedback_router)
+app.include_router(file_router)
+app.include_router(transcription_router)
+app.include_router(vision_router)

@@ -3,32 +3,43 @@ import logging
 from typing import Any
 
 import dlib
-from flask import Blueprint, jsonify, request, send_file
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
-from api.core.models import TTSRequest
 from api.services.tts_service import TTSError, synthesise
 
-misc_bp = Blueprint("misc", __name__)
+misc_router = APIRouter()
 
 
-@misc_bp.route("/api/test", methods=["GET"])
-def test_endpoint() -> tuple[dict[str, Any], int]:
+class TTSBody(BaseModel):
+    """Request body for TTS generation."""
+
+    text: str
+    voice: str | None = None
+    speed: float = 1.05
+    category: str | None = None
+
+
+@misc_router.get("/api/test")
+def test_endpoint() -> dict[str, Any]:
     """Verify core API functionality.
 
     Returns:
-        Tuple of response dict and HTTP status code
+        Status dict with component availability flags
     """
     try:
         dlib.get_frontal_face_detector()
 
         emotion_model_available = False
         try:
-            from deepface import DeepFace  # noqa: F401
+            from deepface import DeepFace  # pylint: disable=import-outside-toplevel
+            _ = DeepFace
             emotion_model_available = True
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             logging.warning("Emotion detection unavailable: %s", e)
 
-        return jsonify({
+        return {
             "status": "ok",
             "message": "Backend API is running",
             "details": {
@@ -36,79 +47,49 @@ def test_endpoint() -> tuple[dict[str, Any], int]:
                 "emotion_model": emotion_model_available,
                 "version": "1.0.0",
             },
-        }), 200
+        }
 
     except Exception as e:  # pylint: disable=broad-exception-caught
         logging.error("Health check failed: %s", e, exc_info=True)
-        return jsonify({
-            "status": "error",
-            "message": str(e),
-            "details": {
-                "face_detection": False,
-                "emotion_model": False,
-                "version": "1.0.0",
-            },
-        }), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@misc_bp.route("/api/tts-core", methods=["POST", "OPTIONS"])
-def tts_core_endpoint() -> Any:
+@misc_router.post("/api/tts-core")
+def tts_core_endpoint(body: TTSBody) -> StreamingResponse:
     """Generate speech audio from text.
 
-    Accepts JSON with:
-        text: Text to convert (required)
-        voice: Voice ID (optional)
-        speed: Speech speed 0.7--2.0 (optional)
-        category: Practice category forwarded in response header (optional)
+    Args:
+        body: TTS request with text, voice, speed, and optional category
 
     Returns:
-        WAV audio file or error JSON
+        WAV audio stream
+
+    Raises:
+        HTTPException: If TTS generation fails
     """
-    if request.method == "OPTIONS":
-        response = misc_bp.make_default_options_response()
-        response.headers.update({
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Content-Type, Accept",
-            "Access-Control-Allow-Methods": "POST, OPTIONS",
-        })
-        return response
-
     try:
-        data = request.get_json()
-        if not data or "text" not in data:
-            return jsonify({"error": "Missing required parameter: text"}), 400
+        logging.info("TTS request: %d chars", len(body.text))
+        buffer = synthesise(body.text, body.voice, body.speed)
 
-        req = TTSRequest.from_dict(data)
-
-        logging.info("TTS request: %d chars", len(req.text))
-        buffer = synthesise(req.text, req.voice, req.speed)
-
-        response = send_file(
-            buffer,
-            mimetype="audio/wav",
-            as_attachment=True,
-            download_name="tts_speech.wav",
-        )
-        response.headers.update({
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Content-Type, Accept",
+        headers = {
+            "Content-Disposition": "attachment; filename=tts_speech.wav",
             "Access-Control-Expose-Headers": (
                 "Content-Type, Content-Disposition, X-Practice-Category"
             ),
-        })
-        if req.category:
-            response.headers["X-Practice-Category"] = req.category
+        }
+        if body.category:
+            headers["X-Practice-Category"] = body.category
 
-        return response
+        return StreamingResponse(
+            buffer,
+            media_type="audio/wav",
+            headers=headers,
+        )
 
     except TTSError as e:
         logging.error("TTS error: %s", e)
-        response = jsonify({"error": str(e)})
-        response.headers["Access-Control-Allow-Origin"] = "*"
-        return response, e.status_code
+        raise HTTPException(status_code=e.status_code, detail=str(e))
 
     except Exception as e:  # pylint: disable=broad-exception-caught
         logging.error("TTS endpoint error: %s", e, exc_info=True)
-        response = jsonify({"error": str(e)})
-        response.headers["Access-Control-Allow-Origin"] = "*"
-        return response, 500
+        raise HTTPException(status_code=500, detail=str(e))

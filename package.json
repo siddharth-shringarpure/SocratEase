@@ -1,10 +1,10 @@
 {
-  "name": "next-flask",
+  "name": "SocratEase",
   "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@11.5.0",
   "scripts": {
-    "backend-dev": "FLASK_DEBUG=1 PYTHONPATH=. uv run python scripts/download_backend_models.py && PYTHONPATH=. uv run python api/app.py",
+    "backend-dev": "uv sync && PYTHONPATH=. uv run --no-sync python scripts/download_backend_models.py && PYTHONPATH=. uv run --no-sync uvicorn api.app:app --host 0.0.0.0 --port 5000 --reload",
     "next-dev": "next dev",
     "dev": "next dev",
     "docker": "NEXT_PUBLIC_API_URL=http://localhost:5000 docker compose up",

@@ -1,13 +1,16 @@
 """Routes for audio feedback generation."""
+import asyncio
 import datetime
 import json
 import logging
-import os
 import subprocess
 import uuid
+from pathlib import Path
 from typing import Any
 
-from flask import Blueprint, Response, current_app, jsonify, request, send_file
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from api.core.constants import DEFAULT_FEEDBACK_TEXT
 from api.services.feedback_service import generate_feedback_text
@@ -15,129 +18,134 @@ from api.services.text_analysis_service import analyse_filler_words
 from api.services.transcription_service import transcribe_audio
 from api.services.tts_service import TTSError, synthesise
 
-feedback_bp = Blueprint("feedback", __name__)
+feedback_router = APIRouter()
 
 
-def _options_response() -> Response:
-    response = current_app.make_default_options_response()
-    response.headers.update({
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type, Accept",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-    })
-    return response
+class FeedbackTextBody(BaseModel):
+    """Request body for feedback text generation."""
+
+    analysis: dict | None = None
+    category: str | None = None
 
 
-def _error_response(message: str, status_code: int) -> tuple[Response, int]:
-    response = jsonify({"error": message})
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    return response, status_code
-
-
-@feedback_bp.route("/api/audio-feedback", methods=["POST", "OPTIONS"])
-def generate_audio_feedback() -> Any:
+@feedback_router.post("/api/audio-feedback")
+async def generate_audio_feedback(
+    file: UploadFile | None = File(None),
+    category: str | None = Form(None),
+) -> StreamingResponse:
     """Generate spoken feedback from an uploaded audio file.
 
-    Accepts multipart form data with:
+    Args:
         file: Audio file to analyse (optional)
-        category: Practice category (optional, form or query param)
+        category: Practice category (optional)
 
     Returns:
-        WAV audio response with analysis in X-Speech-Metrics header,
-        or error JSON
+        WAV audio stream with analysis in X-Speech-Metrics header
+
+    Raises:
+        HTTPException: If TTS generation or processing fails
     """
-    if request.method == "OPTIONS":
-        return _options_response()
-
     try:
-        practice_category = (
-            request.form.get("category")
-            or request.args.get("category")
-        )
-
-        analysis = None
+        analysis: dict | None = None
         speech_speed = 1.0
 
-        if "file" in request.files and request.files["file"].filename:
-            analysis = _process_uploaded_audio(request.files["file"])
+        if file and file.filename:
+            temp_input = await _save_upload(file)
+            try:
+                loop = asyncio.get_event_loop()
+                try:
+                    analysis = await asyncio.wait_for(
+                        loop.run_in_executor(None, _process_audio_file, temp_input),
+                        timeout=120,
+                    )
+                except asyncio.TimeoutError:
+                    logging.error("Audio feedback processing timed out after 120s")
+                    analysis = None
+            finally:
+                temp_input.unlink(missing_ok=True)
 
         feedback_text = generate_feedback_text(
             analysis=analysis,
-            practice_category=practice_category,
+            practice_category=category,
             default_text=DEFAULT_FEEDBACK_TEXT,
         )
 
         logging.info("Generating TTS for feedback: %d chars", len(feedback_text))
         buffer = synthesise(feedback_text, speed=speech_speed)
 
-        metrics_dict = analysis if isinstance(analysis, dict) else {}
+        metrics_dict: dict[str, Any] = analysis if isinstance(analysis, dict) else {}
         if feedback_text:
             metrics_dict["feedback_text"] = feedback_text
 
-        response = send_file(
-            buffer,
-            mimetype="audio/wav",
-            as_attachment=True,
-            download_name="feedback_speech.wav",
-        )
-        response.headers.update({
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Content-Type, Accept",
+        headers = {
+            "Content-Disposition": "attachment; filename=feedback_speech.wav",
             "Access-Control-Expose-Headers": (
                 "Content-Type, Content-Disposition, "
                 "X-Speech-Metrics, X-Practice-Category"
             ),
             "X-Speech-Metrics": json.dumps(metrics_dict),
-            "X-Practice-Category": practice_category or "unknown",
-        })
-        return response
+            "X-Practice-Category": category or "unknown",
+        }
+
+        return StreamingResponse(buffer, media_type="audio/wav", headers=headers)
 
     except TTSError as e:
         logging.error("TTS error in audio feedback: %s", e)
-        return _error_response(str(e), e.status_code)
+        raise HTTPException(status_code=e.status_code, detail=str(e))
 
     except Exception as e:  # pylint: disable=broad-exception-caught
         logging.error("Feedback generation error: %s", e, exc_info=True)
-        return _error_response(str(e), 500)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-def _process_uploaded_audio(file: Any) -> dict | None:
-    """Transcribe and analyse an uploaded audio file.
+async def _save_upload(file: UploadFile) -> Path:
+    """Save an uploaded file to a unique temp path.
 
     Args:
-        file: Werkzeug FileStorage object
+        file: Incoming upload
 
     Returns:
-        Analysis dict from analyse_filler_words, or None on failure
+        Path to the saved temp file
     """
-    temp_dir = os.path.join(os.getcwd(), "temp")
-    os.makedirs(temp_dir, exist_ok=True)
-
+    temp_dir = Path("temp")
+    temp_dir.mkdir(exist_ok=True)
     unique_id = (
         datetime.datetime.now().strftime("%Y%m%d%H%M%S")
         + "_" + str(uuid.uuid4())[:8]
     )
-    temp_input = os.path.join(temp_dir, f"input_{unique_id}.wav")
-    temp_audio = os.path.join(temp_dir, f"audio_{unique_id}.mp3")
+    temp_input = temp_dir / f"input_{unique_id}.wav"
+    temp_input.write_bytes(await file.read())
+    return temp_input
+
+
+def _process_audio_file(temp_input: Path) -> dict | None:
+    """Transcribe and analyse an audio file.
+
+    Args:
+        temp_input: Path to the audio file on disk
+
+    Returns:
+        Analysis dict from analyse_filler_words, or None on failure
+    """
+    if not temp_input.stat().st_size:
+        return None
+
+    temp_audio = temp_input.with_suffix(".mp3")
 
     try:
-        file.save(temp_input)
-        if not os.path.getsize(temp_input):
-            return None
-
         ffmpeg_cmd = [
-            "ffmpeg", "-y", "-i", temp_input, "-vn",
+            "ffmpeg", "-y", "-i", str(temp_input), "-vn",
             "-acodec", "libmp3lame", "-ar", "16000", "-ac", "1",
             "-b:a", "192k",
             "-af", "highpass=f=50,lowpass=f=15000,volume=2,afftdn=nf=-20",
-            temp_audio,
+            str(temp_audio),
         ]
         subprocess.run(ffmpeg_cmd, check=True, capture_output=True, timeout=30)
 
-        if not (os.path.exists(temp_audio) and os.path.getsize(temp_audio)):
+        if not (temp_audio.exists() and temp_audio.stat().st_size):
             return None
 
-        text = transcribe_audio(temp_audio)
+        text = transcribe_audio(str(temp_audio))
         if not text:
             return None
 
@@ -150,43 +158,32 @@ def _process_uploaded_audio(file: Any) -> dict | None:
         return None
 
     finally:
-        for path in [temp_input, temp_audio]:
-            try:
-                if os.path.exists(path):
-                    os.remove(path)
-            except OSError as e:
-                logging.error("Failed to clean up %s: %s", path, e)
+        temp_audio.unlink(missing_ok=True)
 
 
-@feedback_bp.route("/api/generate-feedback-text", methods=["POST", "OPTIONS"])
-def generate_feedback_text_route() -> Any:
+@feedback_router.post("/api/generate-feedback-text")
+def generate_feedback_text_route(body: FeedbackTextBody) -> dict[str, Any]:
     """Generate feedback text without TTS for frontend caching.
 
+    Args:
+        body: Analysis dict and practice category
+
     Returns:
-        JSON with feedback_text and category fields
+        Dict with feedback_text and category fields
+
+    Raises:
+        HTTPException: If generation fails
     """
-    if request.method == "OPTIONS":
-        return _options_response()
-
     try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "No data provided"}), 400
-
-        analysis = data.get("analysis")
-        category = data.get("category")
-
         feedback_text = generate_feedback_text(
-            analysis=analysis,
-            practice_category=category,
+            analysis=body.analysis,
+            practice_category=body.category,
             default_text=DEFAULT_FEEDBACK_TEXT,
         )
 
         logging.info("Generated feedback text: %d chars", len(feedback_text))
-        response = jsonify({"feedback_text": feedback_text, "category": category})
-        response.headers["Access-Control-Allow-Origin"] = "*"
-        return response
+        return {"feedback_text": feedback_text, "category": body.category}
 
     except Exception as e:  # pylint: disable=broad-exception-caught
         logging.error("Feedback text generation error: %s", e, exc_info=True)
-        return _error_response(str(e), 500)
+        raise HTTPException(status_code=500, detail=str(e))

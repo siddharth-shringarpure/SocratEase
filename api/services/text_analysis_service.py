@@ -167,7 +167,7 @@ def logical_flow(text: str) -> float:
     """
     try:
         model_path = os.path.join(
-            os.path.dirname(__file__), "model", "logical_model.pk"
+            os.path.dirname(__file__), "..", "models", "logical_model.pk"
         )
         logging.info("Loading logical flow model from: %s", model_path)
 

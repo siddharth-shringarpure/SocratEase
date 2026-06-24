@@ -1,269 +1,231 @@
-"""Routes for transcription-related endpoints.
-
-This module provides Flask routes for handling audio transcription requests,
-including file upload, processing, analysis, and cleanup functionality.
-"""
+"""Routes for transcription-related endpoints."""
+import asyncio
 import logging
 import os
 import tempfile
+from pathlib import Path
+from typing import Any
 
-from flask import Blueprint, jsonify, request
-from werkzeug.utils import secure_filename
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from pydantic import BaseModel
 
 from api.services.text_analysis_service import analyse_filler_words, calculate_ttr, logical_flow
 from api.services.transcription_service import transcribe_audio
 from api.utils.audio_utils import allowed_audio_file
 
-transcription_bp = Blueprint("transcription", __name__)
+transcription_router = APIRouter()
 
 
-@transcription_bp.route("/api/speech2text", methods=["POST"])
-def transcribe_request() -> tuple[dict, int]:
-    """Handle audio transcription requests and perform analysis.
+class CleanupAudioBody(BaseModel):
+    """Request body for audio file cleanup."""
 
-    Accepts either a JSON request with an audio filename or a direct file upload.
-    Transcribes the audio and performs analysis on the text.
+    audioFilename: str
+
+
+class CleanupVideoBody(BaseModel):
+    """Request body for video file cleanup."""
+
+    videoFilename: str
+
+
+class TranscribeBody(BaseModel):
+    """JSON body for filename-based transcription requests."""
+
+    audioFilename: str | None = None
+
+
+@transcription_router.post("/api/speech2text")
+async def transcribe_request(
+    request: Request,
+    file: UploadFile | None = File(None),
+    audio_filename: str | None = Form(None),
+) -> dict[str, Any]:
+    """Transcribe audio and perform speech analysis.
+
+    Accepts either a file upload or a filename referencing a server-side file.
+
+    Args:
+        file: Audio file upload (optional)
+        audio_filename: Filename of a pre-uploaded audio file (optional)
 
     Returns:
-        Tuple of JSON response dict and HTTP status code
+        Dict with success flag, transcription text, and analysis metrics
+
+    Raises:
+        HTTPException: If no input provided or transcription fails
     """
-    temp_path: str | None = None
+    temp_path: Path | None = None
+    owns_temp = False
 
     try:
         logging.info("Starting transcription request")
 
-        if request.is_json:
-            data = request.get_json()
-            logging.info("Received JSON request: %s", data)
+        # Accept JSON body when no multipart file is present
+        if not file and not audio_filename:
+            content_type = request.headers.get("content-type", "")
+            if "application/json" in content_type:
+                try:
+                    body = await request.json()
+                    audio_filename = body.get("audioFilename") or body.get("audio_filename")
+                except Exception:
+                    pass
 
-            if not data or "audioFilename" not in data:
-                return {
-                    "success": False,
-                    "error": "Missing audioFilename in request"
-                }, 400
+        if file and file.filename:
+            if not allowed_audio_file(file.filename):
+                raise HTTPException(status_code=400, detail="Invalid file type")
 
-            filename = data["audioFilename"]
+            temp_dir = Path("temp")
+            temp_dir.mkdir(exist_ok=True)
+            safe_name = Path(file.filename).name
+            temp_path = temp_dir / safe_name
+            temp_path.write_bytes(await file.read())
+            owns_temp = True
+            logging.info("Received file: %s", file.filename)
+
+        elif audio_filename:
             base_filename = (
-                filename if filename.endswith(".wav")
-                else f"{filename}.wav"
+                audio_filename if audio_filename.endswith(".wav")
+                else f"{audio_filename}.wav"
             )
-
-            file_paths = [
-                os.path.join(os.getcwd(), "uploads", base_filename),
-                os.path.join(os.getcwd(), "public", "uploads", base_filename)
+            candidates = [
+                Path(os.getcwd()) / "uploads" / base_filename,
+                Path(os.getcwd()) / "public" / "uploads" / base_filename,
             ]
-
-            for path in file_paths:
-                if os.path.exists(path):
-                    temp_path = path
+            for candidate in candidates:
+                if candidate.exists():
+                    temp_path = candidate
                     break
 
             if not temp_path:
-                return {"success": False, "error": "Audio file not found"}, 404
+                raise HTTPException(status_code=404, detail="Audio file not found")
 
         else:
-            if "file" not in request.files:
-                return {"success": False, "error": "No file uploaded"}, 400
-
-            file = request.files["file"]
-            if not file.filename:
-                return {"success": False, "error": "Empty filename"}, 400
-
-            logging.info("Received file: %s (%s)", file.filename, file.content_type)
-
-            if not allowed_audio_file(file.filename):
-                return {"success": False, "error": "Invalid file type"}, 400
-
-            temp_dir = os.path.join(os.getcwd(), "temp")
-            os.makedirs(temp_dir, exist_ok=True)
-            temp_path = os.path.join(temp_dir, secure_filename(file.filename))
-            file.save(temp_path)
+            raise HTTPException(
+                status_code=400,
+                detail="Provide either a file upload or audio_filename",
+            )
 
         logging.info("Processing file at: %s", temp_path)
 
         try:
-            transcription = transcribe_audio(temp_path)
-            if transcription:
-                analysis = analyse_filler_words(transcription)
-                analysis["ttr_analysis"] = calculate_ttr(transcription)
+            loop = asyncio.get_event_loop()
+            transcription = await asyncio.wait_for(
+                loop.run_in_executor(None, transcribe_audio, str(temp_path)),
+                timeout=120,
+            )
+        except asyncio.TimeoutError:
+            logging.error("Transcription timed out after 120s")
+            raise HTTPException(status_code=504, detail="Transcription timed out")
 
-                try:
-                    flow_result = logical_flow(transcription)
-                    if flow_result > 0:
-                        analysis["logical_flow"]["score"] = flow_result
-                except Exception as flow_error:  # pylint: disable=broad-exception-caught
-                    logging.warning(
-                        "Using fallback logical flow score: %s", flow_error
-                    )
+        if not transcription:
+            raise HTTPException(status_code=500, detail="Failed to transcribe audio")
 
-                # Clean up the source audio once transcription succeeds,
-                # but only for files that were pre-uploaded rather than streamed
-                if (
-                    temp_path
-                    and "/uploads/" in temp_path
-                    and "/temp/" not in temp_path
-                    and os.path.exists(temp_path)
-                ):
-                    try:
-                        audio_filename = os.path.basename(temp_path)
-                        logging.info(
-                            "Cleaning up audio file after transcription: %s",
-                            audio_filename
-                        )
-                        os.remove(temp_path)
-                    except OSError as cleanup_error:
-                        logging.error(
-                            "Error cleaning up audio file: %s", cleanup_error
-                        )
+        analysis = analyse_filler_words(transcription)
+        analysis["ttr_analysis"] = calculate_ttr(transcription)
 
-                return jsonify({
-                    "success": True,
-                    "text": transcription,
-                    "analysis": analysis,
-                    "cleanup_success": (
-                        not os.path.exists(temp_path) if temp_path else False
-                    )
-                })
-            else:
-                return jsonify({
-                    "success": False,
-                    "error": "Failed to transcribe audio"
-                }), 500
+        try:
+            flow_result = logical_flow(transcription)
+            if flow_result > 0:
+                analysis["logical_flow"]["score"] = flow_result
+        except Exception as flow_error:  # pylint: disable=broad-exception-caught
+            logging.warning("Using fallback logical flow score: %s", flow_error)
 
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            logging.error("Error processing audio: %s", e, exc_info=True)
-            return jsonify({
-                "success": False,
-                "error": f"Error processing audio: {e}"
-            }), 500
+        return {
+            "success": True,
+            "text": transcription,
+            "analysis": analysis,
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logging.error("Error processing audio: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error processing audio: {e}")
 
     finally:
-        if temp_path and "/temp/" in temp_path and os.path.exists(temp_path):
+        if owns_temp and temp_path and temp_path.exists():
             try:
-                os.remove(temp_path)
+                temp_path.unlink()
             except OSError as e:
                 logging.error("Temp file cleanup failed: %s", e)
 
 
-@transcription_bp.route("/api/cleanup-audio", methods=["POST"])
-def cleanup_audio_file() -> tuple[dict, int]:
-    """Clean up audio files from the server.
+@transcription_router.post("/api/cleanup-audio")
+def cleanup_audio_file(body: CleanupAudioBody) -> dict[str, Any]:
+    """Delete an audio file from the server.
 
-    Accepts a JSON request with audioFilename and removes the file
-    from possible storage locations.
-
-    Returns:
-        Tuple of JSON response dict and HTTP status code
-    """
-    try:
-        if not request.is_json:
-            return {"success": False, "error": "Request must be JSON"}, 400
-
-        data = request.get_json()
-        logging.info("Received cleanup request: %s", data)
-
-        if not data or "audioFilename" not in data:
-            return {"success": False, "error": "Missing audioFilename"}, 400
-
-        filename = data["audioFilename"]
-        if not filename.endswith(".wav"):
-            filename = f"{filename}.wav"
-
-        possible_paths = [
-            os.path.join(os.getcwd(), "uploads", filename),
-            os.path.join(os.getcwd(), "public", "uploads", filename),
-            os.path.join(os.getcwd(), "temp", filename),
-            os.path.join(tempfile.gettempdir(), filename)
-        ]
-
-        logging.info(
-            "Checking for audio file %s in locations: %s",
-            filename,
-            possible_paths
-        )
-
-        deleted = False
-        for path in possible_paths:
-            if os.path.exists(path):
-                try:
-                    logging.info("Deleting audio file: %s", path)
-                    os.remove(path)
-                    deleted = True
-                    logging.info("✓ Deleted audio file: %s", filename)
-                except OSError as e:
-                    return {
-                        "success": False,
-                        "error": f"Audio file deletion failed: {e}"
-                    }, 500
-
-        if deleted:
-            return {
-                "success": True,
-                "message": f"Successfully deleted audio file: {filename}"
-            }, 200
-
-        return {"success": False, "error": "Audio file not found"}, 404
-
-    except Exception as e:  # pylint: disable=broad-exception-caught
-        return {
-            "success": False,
-            "error": "Error cleaning up audio file: " + str(e)
-        }, 500
-
-
-@transcription_bp.route("/api/cleanup-video", methods=["POST"])
-def cleanup_video_file() -> tuple[dict, int]:
-    """Clean up video files from the server.
-
-    Accepts a JSON request with videoFilename and removes the file
-    from possible storage locations.
+    Args:
+        body: Filename of the audio file to remove
 
     Returns:
-        Tuple of JSON response dict and HTTP status code
+        Dict with success flag and message
+
+    Raises:
+        HTTPException: If deletion fails or file not found
     """
-    try:
-        if not request.is_json:
-            return {"success": False, "error": "Request must be JSON"}, 400
+    filename = body.audioFilename
+    if not filename.endswith(".wav"):
+        filename = f"{filename}.wav"
 
-        data = request.get_json()
-        if not data or "videoFilename" not in data:
-            return {"success": False, "error": "Missing videoFilename"}, 400
+    possible_paths = [
+        Path(os.getcwd()) / "uploads" / filename,
+        Path(os.getcwd()) / "public" / "uploads" / filename,
+        Path(os.getcwd()) / "temp" / filename,
+        Path(tempfile.gettempdir()) / filename,
+    ]
 
-        filename = data["videoFilename"]
-        if not filename.endswith(".mp4"):
-            filename = f"{filename}.mp4"
+    logging.info("Checking for audio file %s", filename)
 
-        possible_paths = [
-            os.path.join(os.getcwd(), "uploads", filename),
-            os.path.join(os.getcwd(), "public", "uploads", filename),
-            os.path.join(os.getcwd(), "temp", filename),
-            os.path.join(tempfile.gettempdir(), filename)
-        ]
+    for path in possible_paths:
+        if path.exists():
+            try:
+                path.unlink()
+                logging.info("✓ Deleted audio file: %s", filename)
+                return {"success": True, "message": f"Deleted audio file: {filename}"}
+            except OSError as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Audio file deletion failed: {e}",
+                )
 
-        deleted = False
-        for path in possible_paths:
-            if os.path.exists(path):
-                try:
-                    logging.info("Deleting video file: %s", path)
-                    os.remove(path)
-                    deleted = True
-                    logging.info("✓ Deleted video file: %s", filename)
-                except OSError as e:
-                    return {
-                        "success": False,
-                        "error": f"Deletion failed: {e}"
-                    }, 500
+    raise HTTPException(status_code=404, detail="Audio file not found")
 
-        if deleted:
-            return {
-                "success": True,
-                "message": f"Successfully deleted video file: {filename}"
-            }, 200
 
-        return {"success": False, "error": "File not found"}, 404
+@transcription_router.post("/api/cleanup-video")
+def cleanup_video_file(body: CleanupVideoBody) -> dict[str, Any]:
+    """Delete a video file from the server.
 
-    except Exception as e:  # pylint: disable=broad-exception-caught
-        return {
-            "success": False,
-            "error": "Error cleaning up video file: " + str(e)
-        }, 500
+    Args:
+        body: Filename of the video file to remove
+
+    Returns:
+        Dict with success flag and message
+
+    Raises:
+        HTTPException: If deletion fails or file not found
+    """
+    filename = body.videoFilename
+    if not filename.endswith(".mp4"):
+        filename = f"{filename}.mp4"
+
+    possible_paths = [
+        Path(os.getcwd()) / "uploads" / filename,
+        Path(os.getcwd()) / "public" / "uploads" / filename,
+        Path(os.getcwd()) / "temp" / filename,
+        Path(tempfile.gettempdir()) / filename,
+    ]
+
+    for path in possible_paths:
+        if path.exists():
+            try:
+                path.unlink()
+                logging.info("✓ Deleted video file: %s", filename)
+                return {"success": True, "message": f"Deleted video file: {filename}"}
+            except OSError as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Video file deletion failed: {e}",
+                )
+
+    raise HTTPException(status_code=404, detail="Video file not found")

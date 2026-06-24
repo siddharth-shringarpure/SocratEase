@@ -1,10 +1,4 @@
-"""
-Routes for serving files and handling media uploads.
-
-This module provides Flask routes for serving files from local or remote storage,
-handling media uploads (particularly video and audio files), and managing temporary
-file cleanup. It includes CORS handling and automatic audio extraction from videos.
-"""
+"""Router for file serving and media upload endpoints."""
 import atexit
 import datetime
 import json
@@ -14,40 +8,33 @@ import os
 import subprocess
 import tempfile
 from io import BytesIO
+from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from flask import Blueprint, Response, jsonify, request, send_file
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse, Response
 
 # TODO: storage dependency — pending proper storage service extraction
 from api.storage import STORAGE_TYPE, UPLOADS_DIR, storage
 
-file_bp = Blueprint("file", __name__)
+file_router = APIRouter()
 
 
-@file_bp.route("/uploads/<path:filename>", methods=["OPTIONS"])
-def handle_options(filename: str) -> Response:
-    """Handle OPTIONS preflight requests for CORS."""
-    response = Response()
-    response.headers.update({
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, OPTIONS",
-        "Access-Control-Allow-Headers": "*"
-    })
-    return response
-
-
-@file_bp.route("/uploads/<path:filename>", methods=["GET"])
-def serve_file(filename: str) -> Response:
+@file_router.api_route("/uploads/{filename:path}", methods=["GET", "HEAD"])
+async def serve_file(filename: str, request: Request) -> Response:
     """Serve a file from local or remote storage.
 
     Args:
         filename: Name or path of the file to serve
+        request: Incoming request (used to read Range header)
 
     Returns:
-        Flask Response containing the file or an error message
+        File response, partial (206) if Range requested
+
+    Raises:
+        HTTPException: If file not found or serving fails
     """
     logging.info("Attempting to serve file: %s", filename)
-
     range_header = request.headers.get("Range")
 
     try:
@@ -55,7 +42,7 @@ def serve_file(filename: str) -> Response:
             os.path.join(UPLOADS_DIR, filename),
             os.path.join(os.getcwd(), "uploads", filename),
             os.path.join(os.getcwd(), "temp", filename),
-            os.path.join(tempfile.gettempdir(), filename)
+            os.path.join(tempfile.gettempdir(), filename),
         ]
 
         local_path = None
@@ -87,21 +74,17 @@ def serve_file(filename: str) -> Response:
                     data = f.read(end - start + 1)
 
                 return Response(
-                    data,
-                    206,
-                    mimetype=mime_type,
-                    direct_passthrough=True,
+                    content=data,
+                    status_code=206,
+                    media_type=mime_type,
                     headers={
                         "Content-Range": f"bytes {start}-{end}/{file_size}",
                         "Accept-Ranges": "bytes",
                         "Content-Length": str(end - start + 1),
-                        "Access-Control-Allow-Origin": "*",
-                        "Access-Control-Allow-Methods": "GET, OPTIONS",
-                        "Access-Control-Allow-Headers": "*"
-                    }
+                    },
                 )
 
-            return send_file(local_path, mimetype=mime_type)
+            return FileResponse(local_path, media_type=mime_type)
 
         if STORAGE_TYPE != "local" and hasattr(storage, "get_file_bytes"):
             logging.info("Attempting remote storage retrieval: %s", filename)
@@ -114,82 +97,62 @@ def serve_file(filename: str) -> Response:
                 logging.info(
                     "Serving remote file: %s, mime type: %s", filename, mime_type
                 )
-
-                return Response(
-                    file_bytes,
-                    mimetype=mime_type,
-                    headers={
-                        "Access-Control-Allow-Origin": "*",
-                        "Access-Control-Allow-Methods": "GET, OPTIONS",
-                        "Access-Control-Allow-Headers": "*"
-                    }
-                )
+                return Response(content=file_bytes, media_type=mime_type)
         else:
             logging.error("StorageManager missing get_file_bytes method")
 
         logging.error("File not found: %s", filename)
-        return "File not found", 404
+        raise HTTPException(status_code=404, detail="File not found")
 
-    except Exception as e:
+    except HTTPException:
+        raise
+    except Exception as e:  # pylint: disable=broad-exception-caught
         logging.error("Error serving file %s: %s", filename, e)
-        return f"Error serving file: {e}", 500
+        raise HTTPException(status_code=500, detail=f"Error serving file: {e}")
 
 
-@file_bp.route("/api/recordings", methods=["POST"])
-def upload_recording() -> Response:
+@file_router.post("/api/recordings")
+async def upload_recording(video: UploadFile = File(...)) -> dict:
     """Handle recording uploads with automatic audio extraction.
 
-    Expects a video file in the request and extracts audio if present.
-    Saves both video and audio files using the storage manager.
+    Reads the uploaded video, saves to temp, probes for audio, extracts
+    audio with ffmpeg if present, and saves both via the storage manager.
+
+    Args:
+        video: Uploaded video file
 
     Returns:
-        JSON response with file URLs and metadata
+        Dict with file URLs and metadata
+
+    Raises:
+        HTTPException: On validation or processing failure
     """
     try:
-        logging.info(
-            "Received request to /api/recordings with method: %s", request.method
-        )
-        logging.info("Request files: %s", list(request.files.keys()))
-        logging.info("Request form data: %s", list(request.form.keys()))
+        logging.info("Received recording upload: %s (%s)", video.filename, video.content_type)
 
-        if "video" not in request.files:
-            logging.error("No video file in request")
-            return jsonify({"error": "Video file is required"}), 400
-
-        video_file = request.files["video"]
-        logging.info(
-            "Video info: %s, content type: %s",
-            video_file.filename,
-            video_file.content_type
-        )
-
-        if not video_file.filename:
-            return jsonify({"error": "No selected file"}), 400
+        if not video.filename:
+            raise HTTPException(status_code=400, detail="No selected file")
 
         try:
-            device_id_hash = video_file.filename.split("_")[0]
+            device_id_hash = video.filename.split("_")[0]
             if not device_id_hash or len(device_id_hash) < 6:
-                return jsonify({"error": "Invalid device ID in filename"}), 400
-        except Exception as e:
+                raise HTTPException(status_code=400, detail="Invalid device ID in filename")
+        except HTTPException:
+            raise
+        except Exception as e:  # pylint: disable=broad-exception-caught
             logging.error("Error extracting device ID hash: %s", e)
-            return jsonify({
-                "error": f"Could not extract device ID hash from filename: {video_file.filename}"
-            }), 400
+            raise HTTPException(
+                status_code=400,
+                detail=f"Could not extract device ID hash from filename: {video.filename}",
+            )
 
-        storage.save_file(video_file, video_file.filename, content_type="video/mp4")
+        contents = await video.read()
+        storage.save_file(BytesIO(contents), video.filename, content_type="video/mp4")
 
-        temp_dir = os.path.join(os.getcwd(), "temp")
-        os.makedirs(temp_dir, exist_ok=True)
-        temp_video = os.path.join(temp_dir, video_file.filename)
-
-        try:
-            video_file.seek(0)
-            video_file.save(temp_video)
-            if not os.path.exists(temp_video):
-                raise IOError(f"Failed to save temp video: {temp_video}")
-        except Exception as e:
-            logging.error("Error saving to temp: %s", e)
-            return jsonify({"error": f"Failed to save temporary video file: {e}"}), 500
+        temp_dir = Path("temp")
+        temp_dir.mkdir(exist_ok=True)
+        temp_video = temp_dir / video.filename
+        temp_video.write_bytes(contents)
 
         has_audio = False
         audio_filename = None
@@ -201,10 +164,10 @@ def upload_recording() -> Response:
                 "-select_streams", "a:0",
                 "-show_entries", "stream=codec_type",
                 "-of", "json",
-                temp_video
+                str(temp_video),
             ],
             capture_output=True,
-            text=True
+            text=True,
         )
 
         logging.info("FFprobe return code: %d", probe_result.returncode)
@@ -222,96 +185,87 @@ def upload_recording() -> Response:
 
         if has_audio:
             try:
-                audio_filename = video_file.filename.replace(".mp4", "_audio.wav")
-                temp_audio = os.path.join(temp_dir, audio_filename)
+                audio_filename = video.filename.replace(".mp4", "_audio.wav")
+                temp_audio = temp_dir / audio_filename
 
                 subprocess.run(
                     [
-                        "ffmpeg",
-                        "-y",
-                        "-i", temp_video,
-                        "-vn",
-                        "-acodec", "pcm_s16le",
-                        "-ac", "2",
-                        "-ar", "44100",
-                        "-hide_banner",
-                        "-loglevel", "info",
-                        temp_audio
+                        "ffmpeg", "-y", "-i", str(temp_video),
+                        "-vn", "-acodec", "pcm_s16le",
+                        "-ac", "2", "-ar", "44100",
+                        "-hide_banner", "-loglevel", "info",
+                        str(temp_audio),
                     ],
                     capture_output=True,
-                    text=True
+                    text=True,
                 )
 
-                if os.path.exists(temp_audio) and os.path.getsize(temp_audio) > 0:
-                    with open(temp_audio, "rb") as audio_file:
-                        audio_content = audio_file.read()
-                        audio_file_obj = BytesIO(audio_content)
-                        storage.save_file(
-                            audio_file_obj, audio_filename, content_type="audio/wav"
-                        )
+                if temp_audio.exists() and temp_audio.stat().st_size > 0:
+                    storage.save_file(
+                        BytesIO(temp_audio.read_bytes()),
+                        audio_filename,
+                        content_type="audio/wav",
+                    )
                 else:
                     has_audio = False
                     audio_filename = None
 
-                for temp_file in [temp_audio, temp_video]:
-                    if os.path.exists(temp_file):
-                        try:
-                            os.remove(temp_file)
-                        except Exception as e:
-                            logging.error(
-                                "Failed to clean up temp file %s: %s", temp_file, e
-                            )
+                for tmp in [temp_audio, temp_video]:
+                    try:
+                        tmp.unlink(missing_ok=True)
+                    except OSError as e:
+                        logging.error("Failed to clean up temp file %s: %s", tmp, e)
 
             except Exception as e:  # pylint: disable=broad-exception-caught
                 logging.error("Audio extraction error: %s", e, exc_info=True)
                 has_audio = False
                 audio_filename = None
 
-        if os.path.exists(temp_video):
-            try:
-                logging.info("Cleaning up temporary video file: %s", temp_video)
-                os.remove(temp_video)
-            except Exception as e:
-                logging.warning(
-                    "Failed to clean up temporary video file: %s", e
-                )
+        try:
+            temp_video.unlink(missing_ok=True)
+        except OSError as e:
+            logging.warning("Failed to clean up temporary video file: %s", e)
 
-        video_url = storage.get_file_url(video_file.filename)
+        video_url = storage.get_file_url(video.filename)
         audio_url = storage.get_file_url(audio_filename) if audio_filename else None
 
-        return jsonify({
+        return {
             "success": True,
-            "filename": video_file.filename,
+            "filename": video.filename,
             "audio_filename": audio_filename,
             "has_audio": has_audio,
             "videoUrl": video_url,
-            "audioUrl": audio_url
-        })
+            "audioUrl": audio_url,
+        }
 
+    except HTTPException:
+        raise
     except Exception as e:  # pylint: disable=broad-exception-caught
         logging.error("Recording upload error: %s", e, exc_info=True)
-        return jsonify({"error": "Failed to upload recording"}), 500
+        raise HTTPException(status_code=500, detail="Failed to upload recording")
 
 
-@file_bp.route("/api/recordings", methods=["GET"])
-def get_recording() -> Response:
+@file_router.get("/api/recordings")
+async def get_recording(filename: str = Query(...)) -> FileResponse:
     """Retrieve a recording file by filename.
 
+    Args:
+        filename: Name of the recording file
+
     Returns:
-        The requested file or an error response
+        FileResponse for the requested recording
+
+    Raises:
+        HTTPException: If file not found or validation fails
     """
     try:
-        filename = request.args.get("filename")
-        if not filename:
-            return jsonify({"error": "Filename required"}), 400
-
         device_id_hash = filename.split("_")[0]
         if not device_id_hash or len(device_id_hash) < 6:
-            return jsonify({"error": "Invalid device ID"}), 400
+            raise HTTPException(status_code=400, detail="Invalid device ID")
 
         file_path = os.path.join(UPLOADS_DIR, filename)
         if not os.path.exists(file_path):
-            return jsonify({"error": "File not found"}), 404
+            raise HTTPException(status_code=404, detail="File not found")
 
         if filename.endswith(".mp4"):
             content_type = "video/mp4"
@@ -320,29 +274,13 @@ def get_recording() -> Response:
         else:
             content_type = "application/octet-stream"
 
-        return send_file(
-            file_path,
-            mimetype=content_type,
-            as_attachment=False,
-            download_name=filename
-        )
+        return FileResponse(file_path, media_type=content_type, filename=filename)
 
+    except HTTPException:
+        raise
     except Exception as e:  # pylint: disable=broad-exception-caught
         logging.error("Recording retrieval error: %s", e, exc_info=True)
-        return jsonify({"error": "Failed to retrieve recording"}), 500
-
-
-@file_bp.route("/api/recordings", methods=["OPTIONS"])
-def handle_recordings_options() -> Response:
-    """Handle CORS preflight for the /api/recordings endpoint."""
-    response = Response()
-    response.headers.update({
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-        "Access-Control-Allow-Headers": "*",
-        "Access-Control-Allow-Credentials": "true"
-    })
-    return response
+        raise HTTPException(status_code=500, detail="Failed to retrieve recording")
 
 
 def cleanup_old_temp_files() -> None:
@@ -367,7 +305,7 @@ def cleanup_old_temp_files() -> None:
                         mp4_files.append(os.path.join(temp_dir, filename))
                     elif filename.endswith(".wav") or filename.endswith("_audio.wav"):
                         wav_files.append(os.path.join(temp_dir, filename))
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 logging.error("Error listing files in %s: %s", temp_dir, e)
                 continue
 
@@ -375,7 +313,7 @@ def cleanup_old_temp_files() -> None:
                 "Found %d MP4 and %d WAV files in %s",
                 len(mp4_files),
                 len(wav_files),
-                temp_dir
+                temp_dir,
             )
 
             current_time = datetime.datetime.now()
@@ -392,87 +330,60 @@ def cleanup_old_temp_files() -> None:
                             logging.info(
                                 "Deleting old temporary file: %s (age: %.2f hours)",
                                 file_path,
-                                age_hours
+                                age_hours,
                             )
                             os.remove(file_path)
                             deleted_count += 1
                             overall_deleted_count += 1
-                        except Exception as e:
+                        except Exception as e:  # pylint: disable=broad-exception-caught
                             logging.error("Error deleting file %s: %s", file_path, e)
-                except Exception as e:
+                except Exception as e:  # pylint: disable=broad-exception-caught
                     logging.error("Error processing file %s: %s", file_path, e)
 
             logging.info(
                 "Cleanup complete for %s. Deleted %d old temporary files.",
                 temp_dir,
-                deleted_count
+                deleted_count,
             )
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             logging.error("Error cleaning up directory %s: %s", temp_dir, e)
 
     logging.info("Overall cleanup complete. Total deleted: %d files.", overall_deleted_count)
 
 
 def cleanup_on_startup() -> None:
-    """Delete all video and audio files from temp and upload directories on startup."""
-    overall_deleted_count = 0
+    """Delete temp media files older than 1 hour on startup.
 
-    directories_to_clean = [
-        tempfile.gettempdir(),
-        os.path.join(os.getcwd(), "temp"),
-        os.path.join(os.getcwd(), "uploads"),
-        os.path.join(os.getcwd(), "public", "uploads")
-    ]
+    Only cleans temp directories — uploads are not touched so recordings
+    survive server restarts.
+    """
+    temp_dirs = [tempfile.gettempdir(), os.path.join(os.getcwd(), "temp")]
+    cutoff = datetime.datetime.now() - datetime.timedelta(hours=1)
+    deleted = 0
 
-    for directory in directories_to_clean:
+    for temp_dir in temp_dirs:
+        if not os.path.exists(temp_dir):
+            continue
         try:
-            if not os.path.exists(directory):
-                logging.info(
-                    "Directory does not exist, skipping cleanup: %s", directory
-                )
-                continue
-
-            logging.info(
-                "Cleaning up all media files on startup in: %s", directory
-            )
-
-            media_files = []
-
-            try:
-                for filename in os.listdir(directory):
-                    if filename.endswith((".mp4", ".wav", "_audio.wav")):
-                        file_path = os.path.join(directory, filename)
-                        if os.path.isfile(file_path):
-                            media_files.append(file_path)
-            except Exception as e:
-                logging.error("Error listing files in %s: %s", directory, e)
-                continue
-
-            logging.info(
-                "Found %d media files in %s", len(media_files), directory
-            )
-
-            deleted_count = 0
-            for file_path in media_files:
+            for filename in os.listdir(temp_dir):
+                if not filename.endswith((".mp4", ".wav")):
+                    continue
+                file_path = os.path.join(temp_dir, filename)
                 try:
-                    logging.info("Deleting media file on startup: %s", file_path)
-                    os.remove(file_path)
-                    deleted_count += 1
-                    overall_deleted_count += 1
-                except Exception as e:
-                    logging.error("Error deleting file %s: %s", file_path, e)
+                    if (
+                        os.path.isfile(file_path)
+                        and datetime.datetime.fromtimestamp(
+                            os.path.getmtime(file_path)
+                        ) < cutoff
+                    ):
+                        os.remove(file_path)
+                        deleted += 1
+                except OSError as e:
+                    logging.error("Error deleting temp file %s: %s", file_path, e)
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logging.error("Error scanning temp dir %s: %s", temp_dir, e)
 
-            logging.info(
-                "Startup cleanup complete for %s. Deleted %d media files.",
-                directory,
-                deleted_count
-            )
-        except Exception as e:
-            logging.error("Error cleaning up directory %s: %s", directory, e)
-
-    logging.info(
-        "Startup cleanup complete. Total deleted: %d files.", overall_deleted_count
-    )
+    logging.info("Startup temp cleanup complete. Deleted %d old files.", deleted)
 
 
 logging.info("Running startup cleanup...")

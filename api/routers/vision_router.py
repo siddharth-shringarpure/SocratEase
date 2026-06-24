@@ -1,33 +1,32 @@
-"""Routes for vision-related endpoints, including face detection and gaze tracking.
+"""Router for vision-related endpoints, including face detection and gaze tracking.
 
-This module provides Flask routes for processing images and video streams to detect
-facial features, gaze direction, and emotions. It uses MediaPipe for face detection
-and landmark tracking, and DeepFace for emotion detection.
+Processes images and video streams to detect facial features, gaze direction,
+and emotions using MediaPipe for face detection and DeepFace for emotion analysis.
 """
 import base64
 import io
 import logging
 import os
-from typing import Any
 
 import cv2
 import mediapipe as mp
 import numpy as np
-from flask import Blueprint, jsonify, request
+from fastapi import APIRouter, HTTPException
 from mediapipe import solutions
 from mediapipe.framework.formats import landmark_pb2
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 from PIL import Image
+from pydantic import BaseModel
 
-vision_bp = Blueprint("vision", __name__)
+vision_router = APIRouter()
 
 emotion_detector = None
 try:
     from deepface import DeepFace
     emotion_detector = DeepFace
-    logging.info("Successfully initialised emotion detector (DeepFace)")
-except Exception as e:
+    logging.info("✓ Initialised emotion detector (DeepFace)")
+except Exception as e:  # pylint: disable=broad-exception-caught
     logging.warning("Emotion detection disabled: %s", e)
 
 try:
@@ -46,10 +45,16 @@ try:
         num_faces=1
     )
     detector = vision.FaceLandmarker.create_from_options(options)
-    logging.info("Successfully initialised MediaPipe Face Detector")
-except Exception as e:
+    logging.info("✓ Initialised MediaPipe Face Detector")
+except Exception as e:  # pylint: disable=broad-exception-caught
     logging.error("Failed to initialise MediaPipe Face Detector: %s", e)
     detector = None
+
+
+class ImageBody(BaseModel):
+    """Request body containing a base64-encoded image."""
+
+    image: str
 
 
 def determine_gaze_direction(face_landmarks) -> str:
@@ -220,24 +225,21 @@ def gen_frames():
         camera.release()
 
 
-@vision_bp.route("/api/detect-gaze", methods=["POST"])
-def detect_gaze() -> Any:
+@vision_router.post("/api/detect-gaze")
+async def detect_gaze(body: ImageBody) -> dict:
     """Detect gaze direction in an uploaded image.
 
-    Expects:
-        JSON with base64-encoded image in 'image' field
+    Args:
+        body: JSON with base64-encoded image in 'image' field
 
     Returns:
-        JSON with gaze direction and face landmarks
-    """
-    if "image" not in request.json:
-        return jsonify({
-            "success": False,
-            "error": "No image data provided"
-        }), 400
+        Dict with gaze direction and face landmarks
 
+    Raises:
+        HTTPException: On decoding or processing failure
+    """
     try:
-        image_data = request.json["image"]
+        image_data = body.image
         image_data = image_data.split(",")[1] if "," in image_data else image_data
         image_bytes = base64.b64decode(image_data)
         image = Image.open(io.BytesIO(image_bytes))
@@ -250,7 +252,7 @@ def detect_gaze() -> Any:
 
         detection_result = detector.detect(mp_image)
         if not detection_result.face_landmarks:
-            return jsonify({"success": True, "face_detected": False})
+            return {"success": True, "face_detected": False}
 
         face_landmarks = detection_result.face_landmarks[0]
         gaze_direction = determine_gaze_direction(face_landmarks)
@@ -292,38 +294,35 @@ def detect_gaze() -> Any:
             "end": {"x": float(arrow_end[0]), "y": float(arrow_end[1])}
         }
 
-        return jsonify({
+        return {
             "success": True,
             "face_detected": True,
             "gaze_direction": gaze_direction,
             "landmarks": landmarks,
             "face_box": face_box,
             "gaze_arrow": gaze_arrow
-        })
+        }
 
     except Exception as e:  # pylint: disable=broad-exception-caught
         logging.error("Error in gaze detection endpoint: %s", e, exc_info=True)
-        return jsonify({"success": False, "error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@vision_bp.route("/api/detect-combined", methods=["POST"])
-def detect_combined() -> Any:
+@vision_router.post("/api/detect-combined")
+async def detect_combined(body: ImageBody) -> dict:
     """Detect both gaze direction and emotions in an uploaded image.
 
-    Expects:
-        JSON with base64-encoded image in 'image' field
+    Args:
+        body: JSON with base64-encoded image in 'image' field
 
     Returns:
-        JSON with combined gaze and emotion detection results
-    """
-    if "image" not in request.json:
-        return jsonify({
-            "success": False,
-            "error": "No image data provided"
-        }), 400
+        Dict with combined gaze and emotion detection results
 
+    Raises:
+        HTTPException: On decoding or processing failure
+    """
     try:
-        image_data = request.json["image"]
+        image_data = body.image
         # Handle data URL format (eg: "data:image/jpeg;base64,/9j/4AAQSkZJRg...")
         image_data = image_data.split(",")[1] if "," in image_data else image_data
 
@@ -335,29 +334,26 @@ def detect_combined() -> Any:
             image_bytes = base64.b64decode(image_data)
         except Exception as decode_error:
             logging.error("Base64 decoding error: %s", decode_error)
-            return jsonify({
-                "success": False,
-                "error": f"Failed to decode image data: {decode_error}"
-            }), 400
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to decode image data: {decode_error}"
+            )
 
         try:
             image = Image.open(io.BytesIO(image_bytes))
         except Exception as image_error:
             logging.error("Image opening error: %s", image_error)
-            return jsonify({
-                "success": False,
-                "error": f"Failed to open image: {image_error}"
-            }), 400
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to open image: {image_error}"
+            )
 
         if image.mode != "RGB":
             image = image.convert("RGB")
 
         image_arr = np.array(image)
 
-        result = {
-            "success": True,
-            "face_detected": False
-        }
+        result: dict = {"success": True, "face_detected": False}
 
         if emotion_detector:
             try:
@@ -384,7 +380,7 @@ def detect_combined() -> Any:
                         "width": box.get("w", 0) / width,
                         "height": box.get("h", 0) / height
                     }
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 logging.error("Error in emotion detection: %s", e)
 
         if detector:
@@ -446,11 +442,13 @@ def detect_combined() -> Any:
                         "landmarks": landmarks,
                         "gaze_arrow": gaze_arrow
                     }
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 logging.error("Error in gaze detection: %s", e)
 
-        return jsonify(result)
+        return result
 
+    except HTTPException:
+        raise
     except Exception as e:  # pylint: disable=broad-exception-caught
         logging.error("Error in combined detection endpoint: %s", e, exc_info=True)
-        return jsonify({"success": False, "error": str(e)}), 500
+        raise HTTPException(status_code=500, detail=str(e))

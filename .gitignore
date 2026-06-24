@@ -57,6 +57,8 @@ api/model/
 api/models/
 *.task
 *.onnx
+*.pk
+*.pkl
 
 # recordings
 uploads/

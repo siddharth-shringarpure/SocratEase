@@ -2302,7 +2302,7 @@ export default function RecordingPage() {
         <p className="text-muted-foreground mb-6">
           The recording you're looking for doesn't exist or has been deleted.
         </p>
-        <Link href="/record" className="button button-primary">
+        <Link href="/camera" className="button button-primary">
           Record a new video
         </Link>
       </main>
