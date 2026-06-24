@@ -62,3 +62,8 @@ api/models/
 
 # recordings
 uploads/
+
+# internal dev docs
+MISTAKES.md
+commit-instructions.md
+py_format.md
